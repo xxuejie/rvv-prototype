@@ -1,7 +1,7 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Expr, FnArg, ItemFn, fold::{Fold}};
+use syn::{fold::Fold, parse_macro_input, Block, FnArg, ItemFn};
 
 struct RvvTransformer(u8);
 
@@ -12,12 +12,7 @@ impl Fold for RvvTransformer {
         i
     }
 
-    fn fold_expr(&mut self, e: Expr) -> Expr {
-        println!("Folding expr: {:#?}", e);
-        e
-    }
-
-    // fn fold_block(&mut self, _block: Block) -> Block {
+    fn fold_block(&mut self, block: Block) -> Block {
         // let i = self.0;
         // let block: Block = parse_quote! {
             // {
@@ -27,8 +22,9 @@ impl Fold for RvvTransformer {
     	          // unimplemented!()
     	      // }
         // };
-        // block
-    // }
+        println!("Folding block: {:#?}", block);
+        block
+    }
 }
 
 #[proc_macro_attribute]
