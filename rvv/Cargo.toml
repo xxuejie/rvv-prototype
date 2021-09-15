@@ -1,0 +1,10 @@
+[package]
+name = "rvv"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+syn = { version = "1.0.76", features = ["extra-traits", "full", "fold"] }
+
+[lib]
+proc-macro = true
