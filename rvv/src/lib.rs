@@ -1,9 +1,11 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{fold::Fold, parse_macro_input, Block, FnArg, ItemFn};
+use rvv_assembler::{RvvInst, ToAsm};
+use std::collections::HashMap;
+use syn::{fold::Fold, parse_macro_input, parse_quote, Block, FnArg, ItemFn};
 
-struct RvvTransformer(u8);
+struct RvvTransformer {}
 
 impl Fold for RvvTransformer {
     fn fold_fn_arg(&mut self, i: FnArg) -> FnArg {
@@ -13,16 +15,15 @@ impl Fold for RvvTransformer {
     }
 
     fn fold_block(&mut self, block: Block) -> Block {
-        // let i = self.0;
-        // let block: Block = parse_quote! {
-            // {
-    	          // unsafe {
-    		            // asm!(".byte 0xba, {}, 0x0, 0x0, 0x0", const #i);
-    	          // }
-    	          // unimplemented!()
-    	      // }
-        // };
-        println!("Folding block: {:#?}", block);
+        let inst = RvvInst::Mul256(3, 4, 5);
+        let a = inst.to_asm();
+        let block: Block = parse_quote! {
+            {
+                #a
+                unimplemented!()
+            }
+        };
+
         block
     }
 }
