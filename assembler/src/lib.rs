@@ -38,32 +38,32 @@ impl ToAsm for RvvInst {
             RvvInst::Store256(vreg, var_name) => {
                 let var = format_ident!("{}", var_name);
                 quote! {
-	                  {
-		                    let mut buf = [0u8; 32];
-		                    unsafe {
-			                      asm!(
-				                        "mov rcx, {0}",
-				                        // This should be vse256
-				                        ".byte 0x22, {1}, 0x34, 0x56",
-				                        in(reg) buf.as_mut_ptr(),
-				                        const #vreg,
-				                        out("rcx") _,
-			                      )
-		                    };
-		                    #var = U256::from_le_bytes(&buf);
-	                  }
+                      {
+                            let mut buf = [0u8; 32];
+                            unsafe {
+                                  asm!(
+                                        "mov rcx, {0}",
+                                        // This should be vse256
+                                        ".byte 0x22, {1}, 0x34, 0x56",
+                                        in(reg) buf.as_mut_ptr(),
+                                        const #vreg,
+                                        out("rcx") _,
+                                  )
+                            };
+                            #var = U256::from_le_bytes(&buf);
+                      }
                 }
             }
             RvvInst::Mul256(dvreg, svreg1, svreg2) => {
                 quote! {
-	                  unsafe {
-		                    asm!(
-			                      // This should be vmul256
-			                      ".byte 0x32, {0}, 0x34, {1}",
-			                      const #dvreg,
-			                      const ((#svreg1 << 4) | #svreg2),
-		                    )
-	                  }
+                      unsafe {
+                            asm!(
+                                  // This should be vmul256
+                                  ".byte 0x32, {0}, 0x34, {1}",
+                                  const #dvreg,
+                                  const ((#svreg1 << 4) | #svreg2),
+                            )
+                      }
                 }
             }
         }

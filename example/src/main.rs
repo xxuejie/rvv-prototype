@@ -7,8 +7,8 @@ use numext_fixed_uint::{u256, U256};
 
 #[rvv_vector]
 fn foo(a: U256, b: U256, c: U256, d: U256) -> U256 {
-    let e = a + b * c;
-    e - d
+    // let e = a + b * c;
+    a * d
 }
 
 fn main() {
