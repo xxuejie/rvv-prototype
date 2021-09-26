@@ -15,7 +15,6 @@ pub enum RvvInst {
 
 // TODO: right now this uses x86 instructions for easy of testing with
 // std, in production we should change 2 parts:
-// * rcx should be a RISC-V register, e.g. t0
 // * Real V instruction format should be used.
 impl ToAsm for RvvInst {
     fn to_asm(&self) -> TokenStream {
@@ -25,12 +24,12 @@ impl ToAsm for RvvInst {
                 quote! {
                     unsafe {
                         asm!(
-                            "mov rcx, {0}",
+                            "mv t0, {0}",
                             // This should be vle256
                             ".byte 0x12, {1}, 0x34, 0x56",
                             in(reg) #var.to_le_bytes().as_ptr(),
                             const #vreg,
-                            out("rcx") _,
+                            out("t0") _,
                         )
                     }
                 }
@@ -42,12 +41,12 @@ impl ToAsm for RvvInst {
                             let mut buf = [0u8; 32];
                             unsafe {
                                   asm!(
-                                        "mov rcx, {0}",
+                                        "mv t0, {0}",
                                         // This should be vse256
                                         ".byte 0x22, {1}, 0x34, 0x56",
                                         in(reg) buf.as_mut_ptr(),
                                         const #vreg,
-                                        out("rcx") _,
+                                        out("t0") _,
                                   )
                             };
                             #var = U256::from_le_bytes(&buf);

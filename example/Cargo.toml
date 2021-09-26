@@ -5,4 +5,5 @@ edition = "2018"
 
 [dependencies]
 "rvv" = { path = "../rvv" }
-"numext-fixed-uint" = "0.1.6"
+# "numext-fixed-uint" = "0.1.6"
+ckb-std = "0.9.0"

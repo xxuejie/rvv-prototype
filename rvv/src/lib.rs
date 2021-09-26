@@ -8,6 +8,41 @@ use syn::{
     ItemFn, Pat, PatType, Stmt, Type,
 };
 
+// TODO: Support U256 [ops](https://doc.rust-lang.org/core/ops/index.html):
+//   Add          The addition operator +.
+//   AddAssign    The addition assignment operator +=.
+//   BitAnd       The bitwise AND operator &.
+//   BitAndAssign The bitwise AND assignment operator &=.
+//   BitOr        The bitwise OR operator |.
+//   BitOrAssign  The bitwise OR assignment operator |=.
+//   BitXor       The bitwise XOR operator ^.
+//   BitXorAssign The bitwise XOR assignment operator ^=.
+//   Div          The division operator /.
+//   DivAssign    The division assignment operator /=.
+//   Mul          The multiplication operator *.
+//   MulAssign    The multiplication assignment operator *=.
+//   Neg          The unary negation operator -.
+//   Not          The unary logical negation operator !.
+//   Rem          The remainder operator %.
+//   RemAssign    The remainder assignment operator %=.
+//   Shl          The left shift operator <<. Note that because this trait is
+//                  implemented for all integer types with multiple right-hand-side types, Rust’s
+//                  type checker has special handling for _ << _, setting the result type for
+//                  integer operations to the type of the left-hand-side operand. This means that
+//                  though a << b and a.shl(b) are one and the same from an evaluation standpoint,
+//                  they are different when it comes to type inference.
+//   ShlAssign    The left shift assignment operator <<=.
+//   Shr          The right shift operator >>. Note that because this trait is
+//                  implemented for all integer types with multiple right-hand-side types, Rust’s
+//                  type checker has special handling for _ >> _, setting the result type for
+//                  integer operations to the type of the left-hand-side operand. This means that
+//                  though a >> b and a.shr(b) are one and the same from an evaluation standpoint,
+//                  they are different when it comes to type inference.
+//   ShrAssign    The right shift assignment operator >>=.
+//   Sub          The subtraction operator -.
+//   SubAssign    The subtraction assignment operator -=.
+
+
 #[derive(Default)]
 struct RvvTransformer {
     last_register: u8,
@@ -116,7 +151,9 @@ impl Fold for RvvTransformer {
 }
 
 #[proc_macro_attribute]
-pub fn rvv_vector(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn rvv_vector(attr: TokenStream, item: TokenStream) -> TokenStream {
+    println!("attr: \"{}\"", attr.to_string());
+    println!("item: \"{}\"", item.to_string());
     let input = parse_macro_input!(item as ItemFn);
 
     let mut transformer = RvvTransformer::default();
