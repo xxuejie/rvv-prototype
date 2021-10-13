@@ -6,22 +6,24 @@
 #![feature(panic_info_message)]
 
 extern crate rvv;
+use ckb_std::default_alloc;
 use rvv::rvv_vector;
-use ckb_std::{
-    default_alloc,
-};
 ckb_std::entry!(program_entry);
- default_alloc!();
+default_alloc!();
 // use numext_fixed_uint::{u256, U256};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Ord, PartialOrd, PartialEq, Eq)]
 pub struct U256([u64; 4]);
 
 impl U256 {
+    pub fn from_u64(value: u64) -> U256 {
+        U256([value, 0, 0, 0])
+    }
+
     pub fn to_le_bytes(&self) -> [u8; 32] {
         let mut buf = [0u8; 32];
         for i in 0..4 {
-            buf[i*8..(i+1)*8].copy_from_slice(&self.0[i].to_le_bytes()[..]);
+            buf[i * 8..(i + 1) * 8].copy_from_slice(&self.0[i].to_le_bytes()[..]);
         }
         buf
     }
@@ -30,32 +32,61 @@ impl U256 {
         let mut inner = [0u64; 4];
         for i in 0..4 {
             let mut buf = [0u8; 8];
-            buf.copy_from_slice(&bytes[i*8..(i+1)*8]);
+            buf.copy_from_slice(&bytes[i * 8..(i + 1) * 8]);
             inner[i] = u64::from_le_bytes(buf);
         }
         U256(inner)
     }
 }
 
-macro_rules! u256 {
-    ($expression:expr) => {
-        U256([$expression, 0, 0, 0])
-    };
-}
-
 #[rvv_vector]
-fn foo(a: U256, b: U256, c: U256, d: U256) -> U256 {
-    // let e = a + b * c;
-    // d * e
-    a * b
+#[no_mangle]
+fn bn256_add(
+    mut ax: U256,
+    mut ay: U256,
+    mut az: U256,
+    mut bx: U256,
+    mut by: U256,
+    mut bz: U256,
+    mut cx: U256,
+    mut cy: U256,
+    mut cz: U256,
+) -> U256 {
+    // a = a + b * c;     // case.1: complex ops, with temporary variable
+    // let x = d * c;     // case.2: simple op, with temporary variable
+    // let y = ax >= by;  // case.3: compare, with temporary variable
+    // a += c;            // case.4: simple op, then assgin to exists variable
+    // a = b % d;         // case.5: simple mod op
+    // -c                 // case.6: return nagetive value
+    cz
+    // return;            // case.7: early return
+    // if y {             // case.8: if else
+    //     c
+    // } else {
+    //     d
+    // }
+    // loop {             // case.9: loop + if + break + continue
+    //     a += c;
+    //     if a > b {
+    //         break;
+    //     }
+    //     if a < b {
+    //         continue;
+    //     }
+    // }
 }
 
 fn program_entry() -> i8 {
-    let a = u256!(0x1);
-    let b = u256!(0x2);
-    let c = u256!(0x3);
-    let d = u256!(0x4);
+    let ax = U256::from_u64(0x1);
+    let ay = U256::from_u64(0x2);
+    let az = U256::from_u64(0x3);
+    let bx = U256::from_u64(0x1);
+    let by = U256::from_u64(0x2);
+    let bz = U256::from_u64(0x3);
+    let cx = U256::from_u64(0x1);
+    let cy = U256::from_u64(0x2);
+    let cz = U256::from_u64(0x3);
 
-    let f = foo(a, b, c, d);
+    let f = bn256_add(ax, ay, az, bx, by, bz, cx, cy, cz);
     0
 }

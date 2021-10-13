@@ -4,10 +4,14 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-syn = { version = "1.0.76", features = ["extra-traits", "full", "fold", "printing"] }
+syn = { version = "1.0.80", features = ["extra-traits", "full", "fold", "printing"] }
 quote = "1.0.9"
 proc-macro2 = "1.0"
 rvv-assembler = { path = "../assembler" }
 
 [lib]
 proc-macro = true
+
+[features]
+default = []
+simulator = ["rvv-assembler/simulator"]
