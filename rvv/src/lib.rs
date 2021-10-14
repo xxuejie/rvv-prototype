@@ -8,6 +8,8 @@ use syn::{
     ExprBinary, ExprPath, FnArg, Ident, ItemFn, Local, Pat, PatIdent, PatType, Stmt, Type,
 };
 
+mod hacspec;
+
 // TODO: Support U256 [ops](https://doc.rust-lang.org/core/ops/index.html):
 //   Add          The addition operator +. (NOTE: actually wrapping_add)
 //   AddAssign    The addition assignment operator +=.
@@ -391,6 +393,5 @@ pub fn rvv_vector(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemFn);
     let mut transformer = RvvTransformer::default();
     let output = transformer.fold_item_fn(input);
-
     TokenStream::from(quote!(#output))
 }
