@@ -1,4 +1,4 @@
-use core::cmp::{PartialEq, Eq, Ord, Ordering};
+use core::cmp::{Eq, Ord, Ordering, PartialEq};
 use core::hash::{Hash, Hasher};
 use im::HashSet;
 use itertools::Itertools;
@@ -20,7 +20,10 @@ impl Serialize for HacspecSpan {
 
 impl Ord for HacspecSpan {
     fn cmp(&self, other: &Self) -> Ordering {
-        Ord::cmp(&(self.0.start(), self.0.end()), &(other.0.start(), other.0.end()))
+        Ord::cmp(
+            &(self.0.start(), self.0.end()),
+            &(other.0.start(), other.0.end()),
+        )
     }
 }
 impl PartialOrd for HacspecSpan {
@@ -37,7 +40,26 @@ impl Eq for HacspecSpan {}
 
 impl Hash for HacspecSpan {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        (self.0.start().line, self.0.start().column, self.0.end().line, self.0.end().column).hash(state)
+        (
+            self.0.start().line,
+            self.0.start().column,
+            self.0.end().line,
+            self.0.end().column,
+        )
+            .hash(state)
+    }
+}
+
+impl fmt::Display for HacspecSpan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{}-{}:{}",
+            self.0.start().column,
+            self.0.start().line,
+            self.0.end().column,
+            self.0.end().line,
+        )
     }
 }
 
@@ -179,6 +201,10 @@ impl fmt::Debug for TypVar {
 
 #[derive(Clone, Hash, PartialEq, Eq, Serialize)]
 pub enum BaseTyp {
+    // NOTE: u256/i256 types are newly added.
+    UInt256,
+    Int256,
+
     Unit,
     Bool,
     UInt128,
@@ -209,6 +235,9 @@ pub enum BaseTyp {
 impl fmt::Display for BaseTyp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            BaseTyp::UInt256 => write!(f, "u256"),
+            BaseTyp::Int256 => write!(f, "i256"),
+
             BaseTyp::Unit => write!(f, "unit"),
             BaseTyp::Bool => write!(f, "bool"),
             BaseTyp::UInt128 => write!(f, "u128"),
@@ -501,14 +530,11 @@ impl Serialize for ItemTagSet {
     }
 }
 
-
 #[derive(Clone, Serialize)]
 pub struct DecoratedItem {
     pub item: Item,
-    pub tags: ItemTagSet
+    pub tags: ItemTagSet,
 }
-
-
 
 #[derive(Clone, Serialize)]
 pub struct Program {

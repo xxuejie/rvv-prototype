@@ -52,20 +52,20 @@ fn bn256_add(
     mut cy: U256,
     mut cz: U256,
 ) -> U256 {
-    // a = a + b * c;     // case.1: complex ops, with temporary variable
-    // let x = d * c;     // case.2: simple op, with temporary variable
-    // let y = ax >= by;  // case.3: compare, with temporary variable
-    // a += c;            // case.4: simple op, then assgin to exists variable
-    // a = b % d;         // case.5: simple mod op
-    // -c                 // case.6: return nagetive value
-    cz
-    // return;            // case.7: early return
-    // if y {             // case.8: if else
+    ax = ax + bx * cx; // case.1: complex ops, with temporary variable
+                       // let x = d * c;     // case.2: simple op, with temporary variable
+                       // let y = ax >= by;  // case.3: compare, with temporary variable
+                       // a += c;            // case.4: simple op, then assgin to exists variable
+    ax = bx % cx; // case.5: simple mod op
+                  // -c                 // TODO case.6: return nagetive value
+    ax
+    // return;            // TODO case.7: early return
+    // if y {             // TODO case.8: if else
     //     c
     // } else {
     //     d
     // }
-    // loop {             // case.9: loop + if + break + continue
+    // loop {             // TODO case.9: loop + if + break + continue
     //     a += c;
     //     if a > b {
     //         break;
@@ -80,13 +80,22 @@ fn program_entry() -> i8 {
     let ax = U256::from_u64(0x1);
     let ay = U256::from_u64(0x2);
     let az = U256::from_u64(0x3);
-    let bx = U256::from_u64(0x1);
-    let by = U256::from_u64(0x2);
-    let bz = U256::from_u64(0x3);
-    let cx = U256::from_u64(0x1);
-    let cy = U256::from_u64(0x2);
-    let cz = U256::from_u64(0x3);
+    let bx = U256::from_u64(0x4);
+    let by = U256::from_u64(0x5);
+    let bz = U256::from_u64(0x6);
+    let cx = U256::from_u64(0x7);
+    let cy = U256::from_u64(0x8);
+    let cz = U256::from_u64(0x9);
 
     let f = bn256_add(ax, ay, az, bx, by, bz, cx, cy, cz);
+    assert_eq!(
+        f,
+        U256::from_u64({
+            let (mut a, b, c) = (1, 4, 7);
+            a = a + b * c;
+            a = b % c;
+            a
+        })
+    );
     0
 }

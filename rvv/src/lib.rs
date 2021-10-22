@@ -1,14 +1,15 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use rvv_assembler::{RvvInst, ToAsm};
+use rvv_assembler::{RvvBlock, RvvInst, ToStmts};
 use std::collections::HashMap;
 use syn::{
     fold::Fold, parse_macro_input, parse_quote, BinOp, Block, Expr, ExprAssign, ExprAssignOp,
     ExprBinary, ExprPath, FnArg, Ident, ItemFn, Local, Pat, PatIdent, PatType, Stmt, Type,
 };
 
-mod hacspec;
+use hacspec::ast;
+// mod syn_to_hacspec;
 
 // TODO: Support U256 [ops](https://doc.rust-lang.org/core/ops/index.html):
 //   Add          The addition operator +. (NOTE: actually wrapping_add)
@@ -105,7 +106,7 @@ struct RvvTransformer {
     v_registers: Registers,
     // general registers
     x_registers: Registers,
-    prefix_stmts: Vec<Stmt>,
+    insts: Vec<RvvInst>,
 }
 
 impl Default for RvvTransformer {
@@ -113,7 +114,7 @@ impl Default for RvvTransformer {
         RvvTransformer {
             v_registers: Registers::new("vector", 32),
             x_registers: Registers::new("general", 32),
-            prefix_stmts: Vec::default(),
+            insts: Vec::default(),
         }
     }
 }
@@ -126,7 +127,7 @@ impl RvvTransformer {
         right_ident: &str,
         // x or v register
         dreg_opt: Option<u8>,
-    ) -> Result<(Stmt, u8), String> {
+    ) -> Result<(RvvInst, u8), String> {
         println!(">> {} {:?} {}", left_ident, op, right_ident);
         let (svreg1, _) = self.v_registers.get_reg(left_ident)?;
         let (svreg2, _) = self.v_registers.get_reg(right_ident)?;
@@ -134,73 +135,78 @@ impl RvvTransformer {
             BinOp::Mul(_) => {
                 let dvreg = dreg_opt
                     .unwrap_or_else(|| self.v_registers.next_register().expect("no register"));
-                let inst = RvvInst::Mul256(dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Mul256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             BinOp::Add(_) => {
                 let dvreg = dreg_opt
                     .unwrap_or_else(|| self.v_registers.next_register().expect("no register"));
-                let inst = RvvInst::Add256(dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Add256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             BinOp::Sub(_) => {
                 let dvreg = dreg_opt
                     .unwrap_or_else(|| self.v_registers.next_register().expect("no register"));
-                let inst = RvvInst::Sub256(dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Sub256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             BinOp::Rem(_) => {
                 let dvreg = dreg_opt
                     .unwrap_or_else(|| self.v_registers.next_register().expect("no register"));
-                let inst = RvvInst::Rem256(dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Rem256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             BinOp::MulEq(_) => {
                 let dvreg = svreg1;
-                let inst = RvvInst::Mul256(dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Mul256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             BinOp::AddEq(_) => {
                 let dvreg = svreg1;
-                let inst = RvvInst::Add256(dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Add256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             BinOp::SubEq(_) => {
                 let dvreg = svreg1;
-                let inst = RvvInst::Sub256(dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Sub256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             BinOp::RemEq(_) => {
                 let dvreg = svreg1;
-                let inst = RvvInst::Rem256(dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Rem256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             BinOp::Ge(_) => {
                 let dxreg = dreg_opt
                     .unwrap_or_else(|| self.x_registers.next_register().expect("no register"));
                 let dvreg = self.v_registers.next_register().expect("no register");
-                let inst = RvvInst::Ge256(dxreg, dvreg, svreg1, svreg2).to_asm();
+                let inst = RvvInst::Ge256(dxreg, dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
             _ => None,
         } {
-            Ok((Stmt::Expr(Expr::Verbatim(inst)), dvreg))
+            // Ok((Stmt::Expr(Expr::Verbatim(inst)), dvreg))
+            Ok((inst, dvreg))
         } else {
             Err(format!("Unsupported binary op: {:?}", op))
         }
     }
 
-    fn resolve_expr(&mut self, expr: &Box<Expr>, stmts: &mut Vec<Stmt>) -> Result<String, String> {
+    fn resolve_expr(
+        &mut self,
+        expr: &Box<Expr>,
+        insts: &mut Vec<RvvInst>,
+    ) -> Result<String, String> {
         match &**expr {
             Expr::Path(path) => Ok(extract_ident_name(path.path.get_ident().unwrap())),
             Expr::Binary(ExprBinary {
                 left, op, right, ..
             }) => {
-                let left_name = self.resolve_expr(left, stmts)?;
-                let right_name = self.resolve_expr(right, stmts)?;
-                let (stmt, dvreg) =
+                let left_name = self.resolve_expr(left, insts)?;
+                let right_name = self.resolve_expr(right, insts)?;
+                let (inst, dvreg) =
                     self.match_binary_op(left_name.as_str(), op, right_name.as_str(), None)?;
-                stmts.push(stmt);
+                insts.push(inst);
                 let (var_name, _) = self.v_registers.search_reg(dvreg).unwrap();
                 Ok(var_name)
             }
@@ -214,26 +220,27 @@ impl RvvTransformer {
         op: &BinOp,
         right: &Box<Expr>,
         dreg_opt: Option<u8>,
-    ) -> Result<(Vec<Stmt>, u8), String> {
-        let mut stmts = Vec::new();
-        let left_name = self.resolve_expr(left, &mut stmts)?;
-        let right_name = self.resolve_expr(right, &mut stmts)?;
-        let (stmt, dvreg) =
+    ) -> Result<(Vec<RvvInst>, u8), String> {
+        let mut insts = Vec::new();
+        let left_name = self.resolve_expr(left, &mut insts)?;
+        let right_name = self.resolve_expr(right, &mut insts)?;
+        let (inst, dvreg) =
             self.match_binary_op(left_name.as_str(), op, right_name.as_str(), dreg_opt)?;
-        stmts.push(stmt);
-        Ok((stmts, dvreg))
+        insts.push(inst);
+        Ok((insts, dvreg))
     }
 
-    fn return_expr(&mut self, dvreg: u8) -> Stmt {
-        let store_inst = RvvInst::Store256(dvreg, "__ret".to_string()).to_asm();
-        let expr: Expr = parse_quote! {
-            {
-                let mut __ret = U256::default();
-                #store_inst;
-                __ret
-            }
-        };
-        Stmt::Expr(expr)
+    fn return_expr(&mut self, dvreg: u8) -> RvvInst {
+        RvvInst::Store256(dvreg, "__ret".to_string())
+        // let store_inst = RvvInst::Store256(dvreg, "__ret".to_string()).to_asm();
+        // let expr: Expr = parse_quote! {
+        //     {
+        //         let mut __ret = U256::default();
+        //         #store_inst;
+        //         __ret
+        //     }
+        // };
+        // Stmt::Expr(expr)
     }
 
     // Path as a return value or a normal statement to ignore.
@@ -241,10 +248,11 @@ impl RvvTransformer {
         &mut self,
         ident: &Ident,
         origin_stmt: Option<&Stmt>,
-    ) -> Result<Option<Stmt>, String> {
+    ) -> Result<Option<RvvInst>, String> {
         let (dvreg, is_fn_arg) = self.v_registers.get_reg(&extract_ident_name(ident))?;
         let rv = if is_fn_arg {
-            origin_stmt.cloned()
+            Some(RvvInst::Store256(dvreg, extract_ident_name(ident)))
+            // origin_stmt.cloned().map(|stmt| RvvInst::Source(stmt))
         } else {
             origin_stmt.map(|_| self.return_expr(dvreg))
         };
@@ -258,7 +266,7 @@ fn extract_ident_name(ident: &Ident) -> String {
 
 impl Fold for RvvTransformer {
     fn fold_fn_arg(&mut self, i: FnArg) -> FnArg {
-        println!("fn_arg: {:#?}", i);
+        // println!("fn_arg: {:#?}", i);
         match &i {
             FnArg::Typed(PatType { pat, ty, .. }) => {
                 if let Pat::Ident(pat_ident) = &**pat {
@@ -270,9 +278,9 @@ impl Fold for RvvTransformer {
                                     .v_registers
                                     .next_register()
                                     .expect("No available register!");
-                                let inst = RvvInst::Load256(vreg, var_name.clone()).to_asm();
-                                let stmt: Stmt = Stmt::Expr(Expr::Verbatim(inst));
-                                self.prefix_stmts.push(stmt);
+                                // let inst = RvvInst::Load256(vreg, var_name.clone()).to_asm();
+                                // let stmt: Stmt = Stmt::Expr(Expr::Verbatim(inst));
+                                self.insts.push(RvvInst::Load256(vreg, var_name.clone()));
                                 let is_fn_arg = true;
                                 self.v_registers.insert(var_name, (vreg, is_fn_arg));
                             }
@@ -287,8 +295,8 @@ impl Fold for RvvTransformer {
 
     fn fold_block(&mut self, block: Block) -> Block {
         println!("block: {:#?}", block);
-        let mut stmts = self.prefix_stmts.clone();
 
+        let mut insts = self.insts.clone();
         // TODO: right now this only supports one expression in a block, add handling
         // for more statements later.
         for (idx, stmt) in block.stmts.iter().enumerate() {
@@ -298,11 +306,11 @@ impl Fold for RvvTransformer {
                 // a
                 Stmt::Expr(Expr::Path(ExprPath { path, .. })) => {
                     let rv_stmt = if is_last_stmt { Some(stmt) } else { None };
-                    if let Some(new_stmt) = self
+                    if let Some(new_inst) = self
                         .handle_path(&path.segments.first().unwrap().ident, rv_stmt)
                         .unwrap()
                     {
-                        stmts.push(new_stmt);
+                        insts.push(new_inst);
                     }
                 }
                 // let x = a * b
@@ -325,9 +333,9 @@ impl Fold for RvvTransformer {
                                 var_name, vreg
                             );
                             self.v_registers.insert(var_name, (vreg, false));
-                            let (new_stmts, _dvreg) =
+                            let (new_insts, _dvreg) =
                                 self.handle_binary_op(left, op, right, Some(vreg)).unwrap();
-                            stmts.extend(new_stmts);
+                            insts.extend(new_insts);
                         } else {
                             panic!("Unsupported local expr: {:?}", expr);
                         }
@@ -339,10 +347,10 @@ impl Fold for RvvTransformer {
                 Stmt::Expr(Expr::Binary(ExprBinary {
                     left, op, right, ..
                 })) => {
-                    let (new_stmts, dvreg) = self.handle_binary_op(left, op, right, None).unwrap();
-                    stmts.extend(new_stmts);
+                    let (new_insts, dvreg) = self.handle_binary_op(left, op, right, None).unwrap();
+                    insts.extend(new_insts);
                     if is_last_stmt {
-                        stmts.push(self.return_expr(dvreg));
+                        insts.push(self.return_expr(dvreg));
                     }
                 }
                 // a *= c
@@ -352,8 +360,8 @@ impl Fold for RvvTransformer {
                     }),
                     _semi,
                 ) => {
-                    let (new_stmts, _dvreg) = self.handle_binary_op(left, op, right, None).unwrap();
-                    stmts.extend(new_stmts);
+                    let (new_insts, _dvreg) = self.handle_binary_op(left, op, right, None).unwrap();
+                    insts.extend(new_insts);
                 }
                 // a = a * c
                 Stmt::Semi(Expr::Assign(ExprAssign { left, right, .. }), _semi) => {
@@ -366,9 +374,9 @@ impl Fold for RvvTransformer {
                     {
                         let var_name = extract_ident_name(path.path.get_ident().unwrap());
                         let (vreg, _) = self.v_registers.get_reg(&var_name).unwrap();
-                        let (new_stmts, _dvreg) =
+                        let (new_insts, _dvreg) =
                             self.handle_binary_op(left, op, right, Some(vreg)).unwrap();
-                        stmts.extend(new_stmts);
+                        insts.extend(new_insts);
                     } else {
                         unimplemented!();
                     }
@@ -379,6 +387,7 @@ impl Fold for RvvTransformer {
             }
         }
 
+        let stmts = RvvBlock::new(insts).to_stmts();
         Block {
             brace_token: block.brace_token,
             stmts,
