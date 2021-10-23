@@ -3,6 +3,9 @@ use quote::{format_ident, quote, ToTokens};
 use std::collections::HashSet;
 use syn::{Expr, Stmt};
 
+mod v_encoder;
+use v_encoder::{Imm, Uimm, VInst, VReg, Vlmul, Vtypei, XReg};
+
 pub trait ToStmts {
     fn to_stmts(&self) -> Vec<Stmt>;
 }
@@ -38,28 +41,64 @@ impl RvvBlock {
     }
 }
 
-// TODO: right now this uses x86 instructions for easy of testing with
-// std, in production we should change 2 parts:
-// * Real V instruction format should be used.
 impl ToStmts for RvvBlock {
     #[cfg(not(feature = "simulator"))]
     fn to_stmts(&self) -> Vec<Stmt> {
         let mut stmts = Vec::new();
         let mut buf_counter: u16 = 0;
+        let vsetvli_ts = {
+            // vsetvli  x0, t0, e256, m1, ta, ma
+            let vinst_bytes = VInst::Vsetvli {
+                rd: XReg::Zero,
+                rs1: XReg::T0,
+                vtypei: Vtypei::new(256, Vlmul::M1, true, true),
+            }
+            .encode_bytes();
+            let b0 = vinst_bytes[0];
+            let b1 = vinst_bytes[1];
+            let b2 = vinst_bytes[2];
+            let b3 = vinst_bytes[3];
+            quote! {
+                unsafe {
+                    asm!(
+                        "li t0, 1",  // AVL = 1
+                        ".byte {0}, {1}, {2}, {3}",
+                        const #b0,
+                        const #b1,
+                        const #b2,
+                        const #b3,
+                    )
+                }
+            }
+        };
+        stmts.push(Stmt::Expr(Expr::Verbatim(vsetvli_ts)));
         for inst in &self.insts {
             let token_stream = match inst {
                 RvvInst::Load256(vreg, var_name) => {
                     println!("[asm] load256 {}, {}", vreg, var_name);
                     let var = format_ident!("{}", var_name);
+                    // vle256.v v1, (t0)
+                    let vinst_bytes = VInst::VleV {
+                        width: 256,
+                        vd: VReg::from_u8(*vreg),
+                        rs1: XReg::T0,
+                        vm: false,
+                    }
+                    .encode_bytes();
+                    let b0 = vinst_bytes[0];
+                    let b1 = vinst_bytes[1];
+                    let b2 = vinst_bytes[2];
+                    let b3 = vinst_bytes[3];
                     quote! {
                         unsafe {
                             asm!(
                                 "mv t0, {0}",
-                                // This should be vle256
-                                ".byte 0x12, {1}, 0x34, 0x56",
+                                ".byte {1}, {2}, {3}, {4}",
                                 in(reg) #var.to_le_bytes().as_ptr(),
-                                const #vreg,
-                                out("t0") _,
+                                const #b0,
+                                const #b1,
+                                const #b2,
+                                const #b3,
                             )
                         }
                     }
@@ -69,18 +108,33 @@ impl ToStmts for RvvBlock {
                     let var = format_ident!("{}", var_name);
                     let var_buf = format_ident!("buf_{}", buf_counter);
                     buf_counter += 1;
+
+                    let vinst_bytes = VInst::VseV {
+                        width: 256,
+                        vs3: VReg::from_u8(*vreg),
+                        rs1: XReg::T0,
+                        vm: false,
+                    }
+                    .encode_bytes();
+                    let b0 = vinst_bytes[0];
+                    let b1 = vinst_bytes[1];
+                    let b2 = vinst_bytes[2];
+                    let b3 = vinst_bytes[3];
                     quote! {
                         let mut #var_buf = [0u8; 32];
                         unsafe {
                             asm!(
                                 "mv t0, {0}",
                                 // This should be vse256
-                                ".byte 0x22, {1}, 0x34, 0x56",
+                                ".byte {1}, {2}, {3}, {4}",
                                 in(reg) #var_buf.as_mut_ptr(),
-                                const #vreg,
-                                out("t0") _,
+                                const #b0,
+                                const #b1,
+                                const #b2,
+                                const #b3,
                             )
                         };
+
                         #var = U256::from_le_bytes(&#var_buf);
                         #var
                     }
@@ -100,9 +154,26 @@ impl ToStmts for RvvBlock {
                 }
                 RvvInst::Add256(dvreg, svreg1, svreg2) => {
                     println!("[asm] add256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    let vinst_bytes = VInst::VaddVv {
+                        vd: VReg::from_u8(*dvreg),
+                        vs2: VReg::from_u8(*svreg2),
+                        vs1: VReg::from_u8(*svreg1),
+                        vm: false,
+                    }
+                    .encode_bytes();
+                    let b0 = vinst_bytes[0];
+                    let b1 = vinst_bytes[1];
+                    let b2 = vinst_bytes[2];
+                    let b3 = vinst_bytes[3];
                     quote! {
                         unsafe {
-                            asm!(".byte 0x31, 0x33, 0x34, 0x35")
+                            asm!(
+                                ".byte {0}, {1}, {2}, {3}",
+                                const #b0,
+                                const #b1,
+                                const #b2,
+                                const #b3,
+                            )
                         }
                     }
                 }
@@ -153,7 +224,6 @@ impl ToStmts for RvvBlock {
                     let var_numext = tmp_ident(*vreg);
                     used_idents.insert(var.clone());
                     used_idents.insert(var_numext.clone());
-                    println!("var: {:?}, var_numext: {:?}", var, var_numext);
                     quote! {
                         let mut #var_numext = ethereum_types::U256::from_little_endian(&#var.to_le_bytes()[..]);
                     }
@@ -164,7 +234,8 @@ impl ToStmts for RvvBlock {
                     let var_numext_data = format_ident!("sim_u256_data_{}", vreg);
                     if used_idents.contains(&var) {
                         quote! {
-                            let #var_numext_data: [u8; 32] = #var_numext.into();
+                            let mut #var_numext_data = [0u8; 32];
+                            #var_numext.to_little_endian(&mut #var_numext_data);
                             #var = U256::from_le_bytes(&#var_numext_data);
                             #var
                         }

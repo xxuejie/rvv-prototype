@@ -294,14 +294,14 @@ impl Fold for RvvTransformer {
     }
 
     fn fold_block(&mut self, block: Block) -> Block {
-        println!("block: {:#?}", block);
+        // println!("block: {:#?}", block);
 
         let mut insts = self.insts.clone();
         // TODO: right now this only supports one expression in a block, add handling
         // for more statements later.
         for (idx, stmt) in block.stmts.iter().enumerate() {
             let is_last_stmt = idx == block.stmts.len() - 1;
-            println!("is last: {}, stmt: {:?}", is_last_stmt, stmt);
+            // println!("is last: {}, stmt: {:?}", is_last_stmt, stmt);
             match stmt {
                 // a
                 Stmt::Expr(Expr::Path(ExprPath { path, .. })) => {

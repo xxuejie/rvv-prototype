@@ -12,7 +12,7 @@ ckb_std::entry!(program_entry);
 default_alloc!();
 // use numext_fixed_uint::{u256, U256};
 
-#[derive(Debug, Default, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Ord, PartialOrd, PartialEq, Eq)]
 pub struct U256([u64; 4]);
 
 impl U256 {
@@ -43,20 +43,20 @@ impl U256 {
 #[no_mangle]
 fn bn256_add(
     mut ax: U256,
-    mut ay: U256,
-    mut az: U256,
-    mut bx: U256,
-    mut by: U256,
-    mut bz: U256,
-    mut cx: U256,
-    mut cy: U256,
-    mut cz: U256,
+    // mut ay: U256,
+    // mut az: U256,
+    bx: U256,
+    // mut by: U256,
+    // mut bz: U256,
+    cx: U256,
+    // mut cy: U256,
+    // mut cz: U256,
 ) -> U256 {
-    ax = ax + bx * cx; // case.1: complex ops, with temporary variable
-                       // let x = d * c;     // case.2: simple op, with temporary variable
-                       // let y = ax >= by;  // case.3: compare, with temporary variable
-                       // a += c;            // case.4: simple op, then assgin to exists variable
-    ax = bx % cx; // case.5: simple mod op
+    // ax = ax + bx * cx; // case.1: complex ops, with temporary variable
+    // let x = d * c;     // case.2: simple op, with temporary variable
+    // let y = ax >= by;  // case.3: compare, with temporary variable
+    // a += c;            // case.4: simple op, then assgin to exists variable
+    ax = bx + cx; // case.5: simple mod op
                   // -c                 // TODO case.6: return nagetive value
     ax
     // return;            // TODO case.7: early return
@@ -78,22 +78,26 @@ fn bn256_add(
 
 fn program_entry() -> i8 {
     let ax = U256::from_u64(0x1);
-    let ay = U256::from_u64(0x2);
-    let az = U256::from_u64(0x3);
+    // let ay = U256::from_u64(0x2);
+    // let az = U256::from_u64(0x3);
     let bx = U256::from_u64(0x4);
-    let by = U256::from_u64(0x5);
-    let bz = U256::from_u64(0x6);
+    // let by = U256::from_u64(0x5);
+    // let bz = U256::from_u64(0x6);
     let cx = U256::from_u64(0x7);
-    let cy = U256::from_u64(0x8);
-    let cz = U256::from_u64(0x9);
+    // let cy = U256::from_u64(0x8);
+    // let cz = U256::from_u64(0x9);
 
-    let f = bn256_add(ax, ay, az, bx, by, bz, cx, cy, cz);
+    let f = bn256_add(
+        ax, // ay, az,
+        bx, // by, bz,
+        cx, // cy, cz
+    );
     assert_eq!(
         f,
         U256::from_u64({
-            let (mut a, b, c) = (1, 4, 7);
-            a = a + b * c;
-            a = b % c;
+            let (b, c) = (4, 7);
+            // a = a + b * c;
+            let a = b + c;
             a
         })
     );
