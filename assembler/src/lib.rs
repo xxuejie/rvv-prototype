@@ -55,25 +55,18 @@ impl ToStmts for RvvBlock {
         let mut buf_counter: u16 = 0;
         let vsetvli_ts = {
             // vsetvli  x0, t0, e256, m1, ta, ma
-            let vinst_bytes = VInst::Vsetvli {
+            let [b0, b1, b2, b3] = VInst::Vsetvli {
                 rd: XReg::Zero,
                 rs1: XReg::T0,
                 vtypei: Vtypei::new(256, Vlmul::M1, true, true),
             }
             .encode_bytes();
-            let b0 = vinst_bytes[0];
-            let b1 = vinst_bytes[1];
-            let b2 = vinst_bytes[2];
-            let b3 = vinst_bytes[3];
             quote! {
                 unsafe {
                     asm!(
                         "li t0, 1",  // AVL = 1
                         ".byte {0}, {1}, {2}, {3}",
-                        const #b0,
-                        const #b1,
-                        const #b2,
-                        const #b3,
+                        const #b0, const #b1, const #b2, const #b3,
                     )
                 }
             }
@@ -85,27 +78,20 @@ impl ToStmts for RvvBlock {
                     println!("[asm] load256 {}, {}", vreg, var_name);
                     let var = format_ident!("{}", var_name);
                     // vle256.v v1, (t0)
-                    let vinst_bytes = VInst::VleV {
+                    let [b0, b1, b2, b3] = VInst::VleV {
                         width: 256,
                         vd: VReg::from_u8(*vreg),
                         rs1: XReg::T0,
                         vm: false,
                     }
                     .encode_bytes();
-                    let b0 = vinst_bytes[0];
-                    let b1 = vinst_bytes[1];
-                    let b2 = vinst_bytes[2];
-                    let b3 = vinst_bytes[3];
                     quote! {
                         unsafe {
                             asm!(
                                 "mv t0, {0}",
                                 ".byte {1}, {2}, {3}, {4}",
                                 in(reg) #var.to_le_bytes().as_ptr(),
-                                const #b0,
-                                const #b1,
-                                const #b2,
-                                const #b3,
+                                const #b0, const #b1, const #b2, const #b3,
                             )
                         }
                     }
@@ -116,17 +102,13 @@ impl ToStmts for RvvBlock {
                     let var_buf = format_ident!("buf_{}", buf_counter);
                     buf_counter += 1;
 
-                    let vinst_bytes = VInst::VseV {
+                    let [b0, b1, b2, b3] = VInst::VseV {
                         width: 256,
                         vs3: VReg::from_u8(*vreg),
                         rs1: XReg::T0,
                         vm: false,
                     }
                     .encode_bytes();
-                    let b0 = vinst_bytes[0];
-                    let b1 = vinst_bytes[1];
-                    let b2 = vinst_bytes[2];
-                    let b3 = vinst_bytes[3];
                     quote! {
                         let mut #var_buf = [0u8; 32];
                         unsafe {
@@ -135,10 +117,7 @@ impl ToStmts for RvvBlock {
                                 // This should be vse256
                                 ".byte {1}, {2}, {3}, {4}",
                                 in(reg) #var_buf.as_mut_ptr(),
-                                const #b0,
-                                const #b1,
-                                const #b2,
-                                const #b3,
+                                const #b0, const #b1, const #b2, const #b3,
                             )
                         };
 
@@ -148,50 +127,36 @@ impl ToStmts for RvvBlock {
                 }
                 RvvInst::Mul256(dvreg, svreg1, svreg2) => {
                     println!("[asm] mul256 {}, {}, {}", dvreg, svreg1, svreg2);
-                    let vinst_bytes = VInst::VmulVv {
+                    let [b0, b1, b2, b3] = VInst::VmulVv {
                         vd: VReg::from_u8(*dvreg),
                         vs2: VReg::from_u8(*svreg2),
                         vs1: VReg::from_u8(*svreg1),
                         vm: false,
                     }
                     .encode_bytes();
-                    let b0 = vinst_bytes[0];
-                    let b1 = vinst_bytes[1];
-                    let b2 = vinst_bytes[2];
-                    let b3 = vinst_bytes[3];
                     quote! {
                         unsafe {
                             asm!(
                                 ".byte {0}, {1}, {2}, {3}",
-                                const #b0,
-                                const #b1,
-                                const #b2,
-                                const #b3,
+                                const #b0, const #b1, const #b2, const #b3,
                             )
                         }
                     }
                 }
                 RvvInst::Add256(dvreg, svreg1, svreg2) => {
                     println!("[asm] add256 {}, {}, {}", dvreg, svreg1, svreg2);
-                    let vinst_bytes = VInst::VaddVv {
+                    let [b0, b1, b2, b3] = VInst::VaddVv {
                         vd: VReg::from_u8(*dvreg),
                         vs2: VReg::from_u8(*svreg2),
                         vs1: VReg::from_u8(*svreg1),
                         vm: false,
                     }
                     .encode_bytes();
-                    let b0 = vinst_bytes[0];
-                    let b1 = vinst_bytes[1];
-                    let b2 = vinst_bytes[2];
-                    let b3 = vinst_bytes[3];
                     quote! {
                         unsafe {
                             asm!(
                                 ".byte {0}, {1}, {2}, {3}",
-                                const #b0,
-                                const #b1,
-                                const #b2,
-                                const #b3,
+                                const #b0, const #b1, const #b2, const #b3,
                             )
                         }
                     }

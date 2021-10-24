@@ -6,7 +6,7 @@
 #![feature(panic_info_message)]
 
 extern crate rvv;
-use ckb_std::default_alloc;
+use ckb_std::{debug, default_alloc};
 use rvv::rvv_vector;
 ckb_std::entry!(program_entry);
 default_alloc!();
@@ -92,6 +92,7 @@ fn program_entry() -> i8 {
         bx, // by, bz,
         cx, // cy, cz
     );
+    debug!("f: {:?}", f);
     assert_eq!(f, U256([4830, 9216, 17971, 22357]));
     // assert_eq!(f, U256([750280, 2317561, 4780776, 8205460]));
     0
