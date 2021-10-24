@@ -148,13 +148,25 @@ impl ToStmts for RvvBlock {
                 }
                 RvvInst::Mul256(dvreg, svreg1, svreg2) => {
                     println!("[asm] mul256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    let vinst_bytes = VInst::VmulVv {
+                        vd: VReg::from_u8(*dvreg),
+                        vs2: VReg::from_u8(*svreg2),
+                        vs1: VReg::from_u8(*svreg1),
+                        vm: false,
+                    }
+                    .encode_bytes();
+                    let b0 = vinst_bytes[0];
+                    let b1 = vinst_bytes[1];
+                    let b2 = vinst_bytes[2];
+                    let b3 = vinst_bytes[3];
                     quote! {
                         unsafe {
                             asm!(
-                                // This should be vmul256
-                                ".byte 0x30, {0}, 0x34, {1}",
-                                const #dvreg,
-                                const ((#svreg1 << 4) | #svreg2),
+                                ".byte {0}, {1}, {2}, {3}",
+                                const #b0,
+                                const #b1,
+                                const #b2,
+                                const #b3,
                             )
                         }
                     }

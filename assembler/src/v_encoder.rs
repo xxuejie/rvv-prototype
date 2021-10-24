@@ -239,6 +239,20 @@ pub enum VInst {
         imm: Imm,
         vm: bool,
     },
+    /// vmul.vv vd, vs2, vs1, vm # Vector-vector
+    VmulVv {
+        vd: VReg,
+        vs2: VReg,
+        vs1: VReg,
+        vm: bool,
+    },
+    /// vmul.vx vd, vs2, rs1, vm # vector-scalar
+    VmulVx {
+        vd: VReg,
+        vs2: VReg,
+        rs1: XReg,
+        vm: bool,
+    },
     /// Vector unit-stride loads
     /// vle{64, 256, 1024}.v vd, (rs1), vm
     VleV {
@@ -323,6 +337,24 @@ impl VInst {
                 rest = set_bits(rest, 5, vm);
                 rest = set_bits(rest, 6, funct6 as u32);
                 (OP_V, rest, imm.0, funct3, vd as u8)
+            }
+            VInst::VmulVv { vd, vs2, vs1, vm } => {
+                let funct6: u8 = 0b100101;
+                let funct3: u8 = FUNCT3_OPIVV;
+                let vm = if vm { 1 } else { 0 };
+                let mut rest: u32 = vs2 as u8 as u32;
+                rest = set_bits(rest, 5, vm);
+                rest = set_bits(rest, 6, funct6 as u32);
+                (OP_V, rest, vs1 as u8, funct3, vd as u8)
+            }
+            VInst::VmulVx { vd, vs2, rs1, vm } => {
+                let funct6: u8 = 0b100101;
+                let funct3: u8 = FUNCT3_OPIVX;
+                let vm = if vm { 1 } else { 0 };
+                let mut rest: u32 = vs2 as u8 as u32;
+                rest = set_bits(rest, 5, vm);
+                rest = set_bits(rest, 6, funct6 as u32);
+                (OP_V, rest, rs1 as u8, funct3, vd as u8)
             }
             VInst::VleV { width, vd, rs1, vm } => {
                 let (funct3, mew) = width_bits(width);
