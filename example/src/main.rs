@@ -77,13 +77,13 @@ fn bn256_add(
 }
 
 fn program_entry() -> i8 {
-    let ax = U256::from_u64(0x1);
+    let ax = U256([0x1122, 0x2233, 0x3344, 0x4455]);
     // let ay = U256::from_u64(0x2);
     // let az = U256::from_u64(0x3);
-    let bx = U256::from_u64(0x4);
+    let bx = U256([0x1234, 0x2345, 0x4567, 0x5678]);
     // let by = U256::from_u64(0x5);
     // let bz = U256::from_u64(0x6);
-    let cx = U256::from_u64(0x7);
+    let cx = U256([0xaa, 0xbb, 0xcc, 0xdd]);
     // let cy = U256::from_u64(0x8);
     // let cz = U256::from_u64(0x9);
 
@@ -92,14 +92,6 @@ fn program_entry() -> i8 {
         bx, // by, bz,
         cx, // cy, cz
     );
-    assert_eq!(
-        f,
-        U256::from_u64({
-            let (b, c) = (4, 7);
-            // a = a + b * c;
-            let a = b + c;
-            a
-        })
-    );
+    assert_eq!(f, U256([4830, 9216, 17971, 22357]));
     0
 }
