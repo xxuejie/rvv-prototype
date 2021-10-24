@@ -4,11 +4,11 @@ use quote::{quote, ToTokens};
 use rvv_assembler::{RvvBlock, RvvInst, ToStmts};
 use std::collections::HashMap;
 use syn::{
-    fold::Fold, parse_macro_input, parse_quote, BinOp, Block, Expr, ExprAssign, ExprAssignOp,
-    ExprBinary, ExprPath, FnArg, Ident, ItemFn, Local, Pat, PatIdent, PatType, Stmt, Type,
+    fold::Fold, parse_macro_input, BinOp, Block, Expr, ExprAssign, ExprAssignOp, ExprBinary,
+    ExprPath, FnArg, Ident, ItemFn, Local, Pat, PatIdent, PatType, Stmt, Type,
 };
 
-use hacspec::ast;
+// use hacspec::ast;
 // mod syn_to_hacspec;
 
 // TODO: Support U256 [ops](https://doc.rust-lang.org/core/ops/index.html):

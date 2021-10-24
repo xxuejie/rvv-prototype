@@ -1,9 +1,16 @@
-use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote, ToTokens};
-use std::collections::HashSet;
 use syn::{Expr, Stmt};
 
+#[cfg(feature = "simulator")]
+use proc_macro2::Ident;
+#[cfg(feature = "simulator")]
+use std::collections::HashSet;
+
+// FIXME: remove all allow later
+#[allow(unused_variables)]
+#[allow(dead_code)]
 mod v_encoder;
+#[allow(unused_imports)]
 use v_encoder::{Imm, Uimm, VInst, VReg, Vlmul, Vtypei, XReg};
 
 pub trait ToStmts {
@@ -195,7 +202,7 @@ impl ToStmts for RvvBlock {
                 }
                 RvvInst::Ge256(dxreg, dvreg, svreg1, svreg2) => {
                     // FIXME: store result as bool or u256 ???
-                    println!("[asm] ge256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    println!("[asm] ge256 {}, {}, {}, {}", dxreg, dvreg, svreg1, svreg2);
                     quote! {
                         unsafe {
                             asm!(".byte 0x34, 0x33, 0x34, 0x35")

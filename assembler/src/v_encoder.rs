@@ -41,12 +41,12 @@ impl Vtypei {
             _ => panic!("Invalid sew value for vtypei: {}", sew),
         };
         let mut value = lmul as u8;
-        value &= (vsew << 3);
+        value &= vsew << 3;
         if ta {
-            value &= (1 << 6);
+            value &= 1 << 6;
         }
         if ma {
-            value &= (1 << 7);
+            value &= 1 << 7;
         }
         Vtypei(value)
     }
@@ -379,7 +379,7 @@ fn width_bits(width: u16) -> (u8, bool) {
         16 => (0b101, false),
         32 => (0b110, false),
         64 => (0b111, false),
-        // FIXME: consist with decoder
+        // NOTE: must consist with decoder
         128 => (0b000, true),
         256 => (0b001, true),
         512 => (0b010, true),
