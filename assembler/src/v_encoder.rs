@@ -41,12 +41,12 @@ impl Vtypei {
             _ => panic!("Invalid sew value for vtypei: {}", sew),
         };
         let mut value = lmul as u8;
-        value &= vsew << 3;
+        value |= vsew << 3;
         if ta {
-            value &= 1 << 6;
+            value |= 1 << 6;
         }
         if ma {
-            value &= 1 << 7;
+            value |= 1 << 7;
         }
         Vtypei(value)
     }
