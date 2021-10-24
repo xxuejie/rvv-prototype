@@ -340,7 +340,7 @@ impl VInst {
             }
             VInst::VmulVv { vd, vs2, vs1, vm } => {
                 let funct6: u8 = 0b100101;
-                let funct3: u8 = FUNCT3_OPIVV;
+                let funct3: u8 = FUNCT3_OPMVV;
                 let vm = if vm { 1 } else { 0 };
                 let mut rest: u32 = vs2 as u8 as u32;
                 rest = set_bits(rest, 5, vm);
@@ -349,7 +349,7 @@ impl VInst {
             }
             VInst::VmulVx { vd, vs2, rs1, vm } => {
                 let funct6: u8 = 0b100101;
-                let funct3: u8 = FUNCT3_OPIVX;
+                let funct3: u8 = FUNCT3_OPMVX;
                 let vm = if vm { 1 } else { 0 };
                 let mut rest: u32 = vs2 as u8 as u32;
                 rest = set_bits(rest, 5, vm);
