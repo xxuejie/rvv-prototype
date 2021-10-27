@@ -28,7 +28,17 @@ use hacspec::ast::{
     DecoratedItem,
     Program,
 };
-use anyhow::{Result, bail};
+use proc_macro2::Span;
+use anyhow::{Result, bail, anyhow};
+
+enum ExprTranslationResultMaybeQuestionMark {
+    TransExpr(Expression, bool), // true if ends with question mark
+    TransStmt(Statement),
+}
+enum ExprTranslationResult {
+    TransExpr(Expression),
+    TransStmt(Statement),
+}
 
 fn translate_toplevel_ident(ident: &syn::Ident) -> Spanned<TopLevelIdent> {
     (TopLevelIdent(ident.to_string()), ident.span().into())
@@ -73,8 +83,8 @@ fn translate_type_args(args: &syn::AngleBracketedGenericArguments) -> Result<Vec
         .collect()
 }
 
-fn translate_base_typ(ty: &syn::Type, span: &syn::Span) -> Result<Spanned<BaseTyp>> {
-    // pub enum Type {
+fn translate_base_typ(ty: &syn::Type, span: &Span) -> Result<Spanned<BaseTyp>> {
+    // pub enum syn::Type {
     //     Array(TypeArray),
     //     BareFn(TypeBareFn),
     //     Group(TypeGroup),
@@ -117,7 +127,6 @@ fn translate_base_typ(ty: &syn::Type, span: &syn::Span) -> Result<Spanned<BaseTy
                                 "u128" => Ok((BaseTyp::UInt128, span.into())),
                                 "i128" => Ok((BaseTyp::Int128, span.into())),
                                 "u256" => Ok((BaseTyp::UInt256, span.into())),
-                                "i256" => Ok((BaseTyp::Int256, span.into())),
                                 "bool" => Ok((BaseTyp::Bool, span.into())),
                                 "usize" => Ok((BaseTyp::Usize, span.into())),
                                 "isize" => Ok((BaseTyp::Isize, span.into())),
@@ -141,7 +150,13 @@ fn translate_base_typ(ty: &syn::Type, span: &syn::Span) -> Result<Spanned<BaseTy
                 None => bail!("empty path are not allowed in Hacspec: {:?}", span),
             }
         }
-        syn::Type::Tuple(tuple) => {
+        syn::Type::Tuple(syn::TypeTuple { paren_token, elems }) => {
+            let span = paren_token.span;
+            let rtys = elems
+                .iter()
+                .map(|ty| translate_base_typ(ty, span))
+                .collect::<Result<Vec<_>>>()?;
+            Ok((BaseTyp::Tuple(rtys), span.into()))
         }
         syn::Type::Reference(_) => {
             bail!("double references not allowed in Hacspec");
@@ -153,7 +168,7 @@ fn translate_base_typ(ty: &syn::Type, span: &syn::Span) -> Result<Spanned<BaseTy
 }
 
 
-fn translate_typ(ty: &syn::Type, span: &syn::Span) -> Result<Spanned<Typ>> {
+fn translate_typ(ty: &syn::Type, span: &Span) -> Result<Spanned<Typ>> {
     match ty {
         // Dereference
         syn::Type::Reference(type_ref) => {
@@ -169,12 +184,215 @@ fn translate_typ(ty: &syn::Type, span: &syn::Span) -> Result<Spanned<Typ>> {
         _ => translate_base_typ(ty)
     }
 }
-fn translate_expr_expects_exp() {}
+
+fn translate_expr(expr: &syn::Expr, span: &Span) -> Result<Spanned<ExprTranslationResult>> {
+    // pub enum Expr {
+    //     Array(ExprArray),
+    //     Assign(ExprAssign),
+    //     AssignOp(ExprAssignOp),
+    //     Async(ExprAsync),
+    //     Await(ExprAwait),
+    //     Binary(ExprBinary),
+    //     Block(ExprBlock),
+    //     Box(ExprBox),
+    //     Break(ExprBreak),
+    //     Call(ExprCall),
+    //     Cast(ExprCast),
+    //     Closure(ExprClosure),
+    //     Continue(ExprContinue),
+    //     Field(ExprField),
+    //     ForLoop(ExprForLoop),
+    //     Group(ExprGroup),
+    //     If(ExprIf),
+    //     Index(ExprIndex),
+    //     Let(ExprLet),
+    //     Lit(ExprLit),
+    //     Loop(ExprLoop),
+    //     Macro(ExprMacro),
+    //     Match(ExprMatch),
+    //     MethodCall(ExprMethodCall),
+    //     Paren(ExprParen),
+    //     Path(ExprPath),
+    //     Range(ExprRange),
+    //     Reference(ExprReference),
+    //     Repeat(ExprRepeat),
+    //     Return(ExprReturn),
+    //     Struct(ExprStruct),
+    //     Try(ExprTry),
+    //     TryBlock(ExprTryBlock),
+    //     Tuple(ExprTuple),
+    //     Type(ExprType),
+    //     Unary(ExprUnary),
+    //     Unsafe(ExprUnsafe),
+    //     Verbatim(TokenStream),
+    //     While(ExprWhile),
+    //     Yield(ExprYield),
+    //     // some variants omitted
+    // }
+
+    match expr {
+        syn::Expr::Binary(expr_binary) => {
+            
+        },
+        syn::Expr::Unary(expr_unary) => {
+            
+        },
+        syn::Expr::Path(expr_path) => {
+            
+        },
+        syn::Expr::Call(expr_call) => {
+            
+        },
+        syn::Expr::MethodCall(expr_methodcall) => {
+            
+        },
+        syn::Expr::Lit(expr_lit) => {
+            
+        },
+        syn::Expr::Assign(expr_assign) => {
+            
+        },
+        syn::Expr::If(expr_if) => {
+            
+        },
+        syn::Expr::ForLoop(expr_forloop) => {
+            
+        },
+        syn::Expr::Index(expr_index) => {
+            
+        },
+        syn::Expr::Tuple(expr_tuple) => {
+            
+        },
+        syn::Expr::Struct(expr_struct) => {
+
+        },
+        syn::Expr::Box(expr_box) => {
+
+        },
+        syn::Expr::Array(expr_array) => {
+        }
+        syn::Expr::Cast(expr_cast) => {
+            
+        },
+        syn::Expr::Type(expr_type) => {
+            
+        },
+        syn::Expr::Let(expr_let) => {
+            
+        },
+        syn::Expr::While(expr_while) => {
+            
+        },
+        syn::Expr::Loop(expr_loop) => {
+            
+        },
+        syn::Expr::Match(expr_match) => {
+            
+        },
+        syn::Expr::Closure(expr_closure) => {
+            
+        },
+        syn::Expr::Block(expr_block) => {
+            
+        },
+        syn::Expr::Async(expr_async) => {
+            
+        },
+        syn::Expr::Await(expr_await) => {
+            
+        },
+        syn::Expr::TryBlock(expr_tryblock) => {
+            
+        },
+        syn::Expr::AssignOp(expr_assignop) => {
+            
+        },
+        syn::Expr::Field(expr_field) => {
+            
+        },
+        syn::Expr::Range(expr_range) => {
+            
+        },
+        syn::Expr::Reference(expr_reference) => {
+            
+        },
+        syn::Expr::Break(expr_break) => {
+            
+        },
+        syn::Expr::Continue(expr_continue) => {
+            
+        },
+        syn::Expr::Return(expr_return) => {
+            
+        },
+        syn::Expr::Macro(expr_macro) => {
+        },
+        syn::Expr::Repeat(expr_repeat) => {
+            // TODO: allow array
+            Err(anyhow!("repeat statements are not allowed in Hacspec: {}", span))
+        },
+        syn::Expr::Yield(expr_yield) => {
+            Err(anyhow!("yield statements are not allowed in Hacspec: {}", span))
+        },
+        syn::Expr::Paren(expr_paren) => translate_expr(&expr_paren.expr, &expr_paren.paren_token.span),
+        syn::Expr::Try(expr_try) => {
+            Err(anyhow!("question marks inside expressions are not allowed in Hacspec: {}", span))
+        },
+        syn::Expr::Group(expr_group) => {
+            Err(anyhow!("syn::ExprGroup are not allowed in Hacspec: {}", span))
+        },
+        syn::Expr::Unsafe(expr_unsafe) => {
+            Err(anyhow!("unsafe blocks are not allowed in Hacspec: {}", span))
+        },
+        syn::Expr::Verbatim(token_stream) => {
+            Err(anyhow!("Tokens in expression position not interpreted by Syn: {}", span))
+        },
+    }
+}
+
+fn translate_expr_expects_exp(expr: &syn::Expr, span: &Span) -> Result<Spanned<Expression>> {
+    match translate_expr(expr, span)? {
+        (ExprTranslationResult::TransExpr(e), span) => Ok((e, span)),
+        (ExprTranslationResult::TransStmt(_), span) => {
+            Err(anyhow!("statements inside expressions are not allowed in Hacspec: {}", span))
+        }
+    }
+}
+
+fn translate_expr_accepts_question_mark(
+    expr: &syn::Expr,
+    span: &Span,
+) -> Result<Spanned<ExprTranslationResultMaybeQuestionMark>> {
+    match expr {
+        syn::Expr::Try(expr_try) => {
+            let (result, span) = translate_expr(expr_try.expr, expr_try.question_token.spans[0])?;
+            match result {
+                ExprTranslationResult::TransExpr(e) => Ok((ExprTranslationResultMaybeQuestionMark::TransExpr(e, true), span)),
+                ExprTranslationResult::TransStmt(_) => {
+                    Err(anyhow!("question-marked blobs cannot contain statements in Hacspec, only pure expressions: {}", span))
+                }
+            }
+        }
+        _ => {
+            let (result, span) = translate_expr(expr, span)?;
+            match result {
+                ExprTranslationResult::TransExpr(e) => Ok((
+                    ExprTranslationResultMaybeQuestionMark::TransExpr(e, false),
+                    span,
+                )),
+                ExprTranslationResult::TransStmt(s) => {
+                    Ok((ExprTranslationResultMaybeQuestionMark::TransStmt(s), span))
+                }
+            }
+        }
+    }
+}
 fn translate_array_decl() {}
 fn translate_natural_integer_decl() {}
 fn translate_simplified_natural_integer_decl() {}
 
-fn translate_pattern(pat: &syn::Pat, span: &syn::Span) -> Result<(Spanned<Pattern>, Option<Spanned<Typ>>)> {
+fn translate_pattern(pat: &syn::Pat, span: &Span) -> Result<(Spanned<Pattern>, Option<Spanned<Typ>>)> {
     match pat {
         syn::Pat::Ident(pat_ident) => {
             // pub struct PatIdent {
@@ -217,7 +435,13 @@ fn translate_statement(stmt: &syn::Stmt) -> Result<Spanned<Statement>> {
     match stmt {
         syn::Stmt::Local(syn::Local{ pat, init, let_token, .. }) => {
             // let x: Type = a.parse();
-            let (pat, ty) = translate_pattern(pat, &let_token.span)?;
+            let span = &let_token.span;
+            let (pat, ty) = translate_pattern(pat, span)?;
+            match init {
+                None => bail!("let-bindings without initialization are not allowed in Hacspec: {}", span);
+                Some((eq, expr)) => {
+                }
+            }
         }
         syn::Stmt::Item(item) => bail!("block-local items are not allowed in Hacspec"),
         syn::Stmt::Expr(expr) => {
@@ -228,11 +452,23 @@ fn translate_statement(stmt: &syn::Stmt) -> Result<Spanned<Statement>> {
 }
 
 fn translate_block(block: &syn::Block) -> Result<Spanned<Block>> {
+    let span = block.brace_token.span;
     let stmts = block
         .stmts
         .iter()
-        .map()
-
+        .map(|stmt| translate_statement(stmt))
+        .collect::<Result<Vec<_>>>()?;
+    Ok((
+        Block {
+            stmts,
+            return_typ: None,
+            mutated: None,
+            contains_question_mark: None,
+            // We initialize these fields to None as they are
+            // to be filled by the typechecker
+        },
+        span.into(),
+    ))
 }
 
 fn translate_item(item: &syn::Item) -> Result<Item> {
@@ -308,6 +544,7 @@ fn translate_item(item: &syn::Item) -> Result<Item> {
                 syn::ReturnType::Default => (BaseTyp::Unit, sig_span.into()),
                 syn::ReturnType::Type(arrow, ty) => translate_base_typ(ty, arrow.spans[1])?,
             };
+            let fn_body: Spanned<Block> = translate_block(block)
         }
         syn::Item::ForeignMod(item) => {
             unimplemented!()
