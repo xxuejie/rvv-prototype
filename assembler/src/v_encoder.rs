@@ -205,6 +205,26 @@ impl VReg {
     }
 }
 
+/// Vector Integer Arithmetic Instructions data structures
+pub struct Ivv {
+    vd: VReg,
+    vs2: VReg,
+    vs1: VReg,
+    vm: bool,
+}
+pub struct Ivx {
+    vd: VReg,
+    vs2: VReg,
+    rs1: XReg,
+    vm: bool,
+}
+pub struct Ivi {
+    vd: VReg,
+    vs2: VReg,
+    imm: Imm,
+    vm: bool,
+}
+
 // 32 bit
 #[derive(Clone, Copy)]
 pub enum VInst {
@@ -218,41 +238,55 @@ pub enum VInst {
     },
     /// vsetvl   rd, rs1, rs2     # rd = new vl, rs1 = AVL, rs2 = new vtype value
     Vsetvl { rd: XReg, rs1: XReg, rs2: XReg },
+
+    // ==== Vector Integer Arithmetic Instructions ====
+
+    // # Integer adds
     /// vadd.vv vd, vs2, vs1, vm   # Vector-vector
-    VaddVv {
-        vd: VReg,
-        vs2: VReg,
-        vs1: VReg,
-        vm: bool,
-    },
+    VaddVv(Ivv)
     /// vadd.vx vd, vs2, rs1, vm   # vector-scalar
-    VaddVx {
-        vd: VReg,
-        vs2: VReg,
-        rs1: XReg,
-        vm: bool,
-    },
+    VaddVx(Ivx),
     /// vadd.vi vd, vs2, imm, vm   # vector-immediate
-    VaddVi {
-        vd: VReg,
-        vs2: VReg,
-        imm: Imm,
-        vm: bool,
-    },
+    VaddVi(Ivi),
+
+    // # Integer subtract
+    /// vsub.vv vd, vs2, vs1, vm # Vector-vector
+    VsubVv(Ivv),
+    /// vsub.vx vd, vs2, rs1, vm # vector-scalar
+    VsubVx(Ivx),
+
+    // # Integer reverse subtract
+    /// vrsub.vx vd, vs2, rs1, vm   # vd[i] = x[rs1] - vs2[i]
+    VrsubVx(Ivx),
+    /// vrsub.vi vd, vs2, imm, vm   # vd[i] = imm - vs2[i]
+    VrsubVi(Ivi),
+
+    // # Signed multiply, returning low bits of product
     /// vmul.vv vd, vs2, vs1, vm # Vector-vector
-    VmulVv {
-        vd: VReg,
-        vs2: VReg,
-        vs1: VReg,
-        vm: bool,
-    },
+    VmulVv(Ivv),
     /// vmul.vx vd, vs2, rs1, vm # vector-scalar
-    VmulVx {
-        vd: VReg,
-        vs2: VReg,
-        rs1: XReg,
-        vm: bool,
-    },
+    VmulVx(Ivx),
+
+    // # Signed multiply, returning high bits of product
+    /// TODO: vmulh.vv vd, vs2, vs1, vm   # Vector-vector
+    /// TODO: vmulh.vx vd, vs2, rs1, vm   # vector-scalar
+
+    // # Unsigned multiply, returning high bits of product
+    /// TODO: vmulhu.vv vd, vs2, vs1, vm   # Vector-vector
+    /// TODO: vmulhu.vx vd, vs2, rs1, vm   # vector-scalar
+
+    // # Signed(vs2)-Unsigned multiply, returning high bits of product
+    /// TODO: vmulhsu.vv vd, vs2, vs1, vm   # Vector-vector
+    /// TODO: vmulhsu.vx vd, vs2, rs1, vm   # vector-scalar
+
+
+    // # Unsigned remainder
+    /// vremu.vv vd, vs2, vs1, vm   # Vector-vector
+    /// vremu.vx vd, vs2, rs1, vm   # vector-scalar
+    // # Signed remainder
+    /// TODO: vrem.vv vd, vs2, vs1, vm   # Vector-vector
+    /// TODO: vrem.vx vd, vs2, rs1, vm   # vector-scalar
+
     /// Vector unit-stride loads
     /// vle{64, 256, 1024}.v vd, (rs1), vm
     VleV {
@@ -340,7 +374,7 @@ impl VInst {
             }
             VInst::VmulVv { vd, vs2, vs1, vm } => {
                 let funct6: u8 = 0b100101;
-                let funct3: u8 = FUNCT3_OPMVV;
+                let funct3: u8 = FUNCT3_OPIVV;
                 let vm = if vm { 1 } else { 0 };
                 let mut rest: u32 = vs2 as u8 as u32;
                 rest = set_bits(rest, 5, vm);
@@ -349,7 +383,7 @@ impl VInst {
             }
             VInst::VmulVx { vd, vs2, rs1, vm } => {
                 let funct6: u8 = 0b100101;
-                let funct3: u8 = FUNCT3_OPMVX;
+                let funct3: u8 = FUNCT3_OPIVX;
                 let vm = if vm { 1 } else { 0 };
                 let mut rest: u32 = vs2 as u8 as u32;
                 rest = set_bits(rest, 5, vm);
