@@ -1,3 +1,5 @@
+// This code is mainly copied from: https://github.com/hacspec/hacspec/blob/7530be1720f14f3d4848c6f26ad5bbc2eb23f3e1/language/src/rustspec.rs
+
 use core::cmp::{Eq, Ord, Ordering, PartialEq};
 use core::hash::{Hash, Hasher};
 use im::HashSet;

@@ -206,23 +206,77 @@ impl VReg {
 }
 
 /// Vector Integer Arithmetic Instructions data structures
+#[derive(Clone, Copy)]
 pub struct Ivv {
-    vd: VReg,
-    vs2: VReg,
-    vs1: VReg,
-    vm: bool,
+    pub vd: VReg,
+    pub vs2: VReg,
+    pub vs1: VReg,
+    pub vm: bool,
 }
+#[derive(Clone, Copy)]
 pub struct Ivx {
-    vd: VReg,
-    vs2: VReg,
-    rs1: XReg,
-    vm: bool,
+    pub vd: VReg,
+    pub vs2: VReg,
+    pub rs1: XReg,
+    pub vm: bool,
 }
+#[derive(Clone, Copy)]
 pub struct Ivi {
-    vd: VReg,
-    vs2: VReg,
-    imm: Imm,
-    vm: bool,
+    pub vd: VReg,
+    pub vs2: VReg,
+    pub imm: Imm,
+    pub vm: bool,
+}
+
+// Vector Arithmetic Instruction
+fn encode_vai(dst: u8, funct3: u8, src1: u8, src2: u8, vm: bool, funct6: u8) -> u32 {
+    let mut value = OP_V;
+    value = set_bits(value, OFFSET_DST, dst as u32);
+    value = set_bits(value, OFFSET_FUNCT3, funct3 as u32);
+    value = set_bits(value, OFFSET_SRC1, src1 as u32);
+    value = set_bits(value, OFFSET_SRC2, src2 as u32);
+    if vm {
+        value = set_bits(value, OFFSET_VM, 1);
+    }
+    value = set_bits(value, OFFSET_FUNCT6, funct6 as u32);
+    value
+}
+
+impl Ivv {
+    fn encode_u32(&self, funct6: u8) -> u32 {
+        encode_vai(
+            self.vd as u8,
+            FUNCT3_OPIVV,
+            self.vs1 as u8,
+            self.vs2 as u8,
+            self.vm,
+            funct6,
+        )
+    }
+}
+impl Ivx {
+    fn encode_u32(&self, funct6: u8) -> u32 {
+        encode_vai(
+            self.vd as u8,
+            FUNCT3_OPIVX,
+            self.rs1 as u8,
+            self.vs2 as u8,
+            self.vm,
+            funct6,
+        )
+    }
+}
+impl Ivi {
+    fn encode_u32(&self, funct6: u8) -> u32 {
+        encode_vai(
+            self.vd as u8,
+            FUNCT3_OPIVI,
+            self.imm.0,
+            self.vs2 as u8,
+            self.vm,
+            funct6,
+        )
+    }
 }
 
 // 32 bit
@@ -243,7 +297,7 @@ pub enum VInst {
 
     // # Integer adds
     /// vadd.vv vd, vs2, vs1, vm   # Vector-vector
-    VaddVv(Ivv)
+    VaddVv(Ivv),
     /// vadd.vx vd, vs2, rs1, vm   # vector-scalar
     VaddVx(Ivx),
     /// vadd.vi vd, vs2, imm, vm   # vector-immediate
@@ -279,10 +333,11 @@ pub enum VInst {
     /// TODO: vmulhsu.vv vd, vs2, vs1, vm   # Vector-vector
     /// TODO: vmulhsu.vx vd, vs2, rs1, vm   # vector-scalar
 
-
     // # Unsigned remainder
     /// vremu.vv vd, vs2, vs1, vm   # Vector-vector
+    VremuVv(Ivv),
     /// vremu.vx vd, vs2, rs1, vm   # vector-scalar
+    VremuVx(Ivx),
     // # Signed remainder
     /// TODO: vrem.vv vd, vs2, vs1, vm   # Vector-vector
     /// TODO: vrem.vx vd, vs2, rs1, vm   # vector-scalar
@@ -305,30 +360,70 @@ pub enum VInst {
     },
 }
 
+const FUNCT3_OPIVV: u8 = 0b000;
+const FUNCT3_OPFVV: u8 = 0b001;
+const FUNCT3_OPMVV: u8 = 0b010;
+const FUNCT3_OPIVI: u8 = 0b011;
+const FUNCT3_OPIVX: u8 = 0b100;
+const FUNCT3_OPFVF: u8 = 0b101;
+const FUNCT3_OPMVX: u8 = 0b110;
+const FUNCT3_OPCFG: u8 = 0b111;
+const MOP_UNIT_STRIDE: u8 = 0b00;
+const OFFSET_DST: usize = 7;
+const OFFSET_FUNCT3: usize = OFFSET_DST + 5;
+const OFFSET_SRC1: usize = OFFSET_FUNCT3 + 3;
+const OFFSET_SRC2: usize = OFFSET_SRC1 + 5;
+const OFFSET_REST: usize = OFFSET_SRC2;
+const OFFSET_VM: usize = OFFSET_SRC2 + 5;
+const OFFSET_FUNCT6: usize = OFFSET_VM + 1;
+
 const OP_V: u32 = 0b1010111;
 const OP_LOAD_FP: u32 = 0b0000111;
 const OP_STORE_FP: u32 = 0b0100111;
 
+const FUNCT6_VADD: u8 = 0b0;
+const FUNCT6_VSUB: u8 = 0b000010;
+const FUNCT6_VRSUB: u8 = 0b000011;
+const FUNCT6_VMUL: u8 = 0b100101;
+const FUNCT6_VREMU: u8 = 0b100010;
+const FUNCT6_VREM: u8 = 0b100011;
+
 impl VInst {
     pub fn encode_u32(self) -> u32 {
-        const FUNCT3_OPIVV: u8 = 0b000;
-        const FUNCT3_OPFVV: u8 = 0b001;
-        const FUNCT3_OPMVV: u8 = 0b010;
-        const FUNCT3_OPIVI: u8 = 0b011;
-        const FUNCT3_OPIVX: u8 = 0b100;
-        const FUNCT3_OPFVF: u8 = 0b101;
-        const FUNCT3_OPMVX: u8 = 0b110;
-        const FUNCT3_OPCFG: u8 = 0b111;
-        const MOP_UNIT_STRIDE: u8 = 0b00;
-        const OFFSET_DST: usize = 7;
-        const OFFSET_FUNCT3: usize = OFFSET_DST + 5;
-        const OFFSET_SRC1: usize = OFFSET_FUNCT3 + 3;
-        const OFFSET_SRC2: usize = OFFSET_SRC1 + 5;
-        const OFFSET_REST: usize = OFFSET_SRC2;
-        const OFFSET_VM: usize = OFFSET_SRC2 + 5;
-        const OFFSET_FUNCT6: usize = OFFSET_VM + 1;
-
         let (base, rest, src1, funct3, dst) = match self {
+            VInst::VaddVv(ivv) => {
+                return ivv.encode_u32(FUNCT6_VADD);
+            }
+            VInst::VaddVx(ivx) => {
+                return ivx.encode_u32(FUNCT6_VADD);
+            }
+            VInst::VaddVi(ivi) => {
+                return ivi.encode_u32(FUNCT6_VADD);
+            }
+            VInst::VsubVv(ivv) => {
+                return ivv.encode_u32(FUNCT6_VSUB);
+            }
+            VInst::VsubVx(ivx) => {
+                return ivx.encode_u32(FUNCT6_VSUB);
+            }
+            VInst::VrsubVx(ivx) => {
+                return ivx.encode_u32(FUNCT6_VRSUB);
+            }
+            VInst::VrsubVi(ivi) => {
+                return ivi.encode_u32(FUNCT6_VRSUB);
+            }
+            VInst::VmulVv(ivv) => {
+                return ivv.encode_u32(FUNCT6_VMUL);
+            }
+            VInst::VmulVx(ivx) => {
+                return ivx.encode_u32(FUNCT6_VMUL);
+            }
+            VInst::VremuVv(ivv) => {
+                return ivv.encode_u32(FUNCT6_VREMU);
+            }
+            VInst::VremuVx(ivx) => {
+                return ivx.encode_u32(FUNCT6_VREMU);
+            }
             VInst::Vsetvli { rd, rs1, vtypei } => {
                 let funct3: u8 = FUNCT3_OPCFG;
                 let rest: u32 = vtypei.0 as u32;
@@ -344,51 +439,6 @@ impl VInst {
                 let funct3: u8 = FUNCT3_OPCFG;
                 let rest: u32 = set_bits(rs2 as u8 as u32, 5 + 6, 1);
                 (OP_V, rest, rs1 as u8, funct3, rd as u8)
-            }
-            VInst::VaddVv { vd, vs2, vs1, vm } => {
-                let funct6: u8 = 0b0;
-                let funct3: u8 = FUNCT3_OPIVV;
-                let vm = if vm { 1 } else { 0 };
-                let mut rest: u32 = vs2 as u8 as u32;
-                rest = set_bits(rest, 5, vm);
-                rest = set_bits(rest, 6, funct6 as u32);
-                (OP_V, rest, vs1 as u8, funct3, vd as u8)
-            }
-            VInst::VaddVx { vd, vs2, rs1, vm } => {
-                let funct6: u8 = 0b0;
-                let funct3: u8 = FUNCT3_OPIVX;
-                let vm = if vm { 1 } else { 0 };
-                let mut rest: u32 = vs2 as u8 as u32;
-                rest = set_bits(rest, 5, vm);
-                rest = set_bits(rest, 6, funct6 as u32);
-                (OP_V, rest, rs1 as u8, funct3, vd as u8)
-            }
-            VInst::VaddVi { vd, vs2, imm, vm } => {
-                let funct6: u8 = 0b0;
-                let funct3: u8 = FUNCT3_OPIVI;
-                let vm = if vm { 1 } else { 0 };
-                let mut rest: u32 = vs2 as u8 as u32;
-                rest = set_bits(rest, 5, vm);
-                rest = set_bits(rest, 6, funct6 as u32);
-                (OP_V, rest, imm.0, funct3, vd as u8)
-            }
-            VInst::VmulVv { vd, vs2, vs1, vm } => {
-                let funct6: u8 = 0b100101;
-                let funct3: u8 = FUNCT3_OPIVV;
-                let vm = if vm { 1 } else { 0 };
-                let mut rest: u32 = vs2 as u8 as u32;
-                rest = set_bits(rest, 5, vm);
-                rest = set_bits(rest, 6, funct6 as u32);
-                (OP_V, rest, vs1 as u8, funct3, vd as u8)
-            }
-            VInst::VmulVx { vd, vs2, rs1, vm } => {
-                let funct6: u8 = 0b100101;
-                let funct3: u8 = FUNCT3_OPIVX;
-                let vm = if vm { 1 } else { 0 };
-                let mut rest: u32 = vs2 as u8 as u32;
-                rest = set_bits(rest, 5, vm);
-                rest = set_bits(rest, 6, funct6 as u32);
-                (OP_V, rest, rs1 as u8, funct3, vd as u8)
             }
             VInst::VleV { width, vd, rs1, vm } => {
                 let (funct3, mew) = width_bits(width);

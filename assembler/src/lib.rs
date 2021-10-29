@@ -11,7 +11,7 @@ use std::collections::HashSet;
 #[allow(dead_code)]
 mod v_encoder;
 #[allow(unused_imports)]
-use v_encoder::{Imm, Uimm, VInst, VReg, Vlmul, Vtypei, XReg};
+use v_encoder::{Imm, Ivi, Ivv, Ivx, Uimm, VInst, VReg, Vlmul, Vtypei, XReg};
 
 pub trait ToStmts {
     fn to_stmts(&self) -> Vec<Stmt>;
@@ -127,12 +127,12 @@ impl ToStmts for RvvBlock {
                 }
                 RvvInst::Mul256(dvreg, svreg1, svreg2) => {
                     // println!("[asm] mul256 {}, {}, {}", dvreg, svreg1, svreg2);
-                    let [b0, b1, b2, b3] = VInst::VmulVv {
+                    let [b0, b1, b2, b3] = VInst::VmulVv(Ivv {
                         vd: VReg::from_u8(*dvreg),
                         vs2: VReg::from_u8(*svreg2),
                         vs1: VReg::from_u8(*svreg1),
                         vm: false,
-                    }
+                    })
                     .encode_bytes();
                     quote! {
                         unsafe {
@@ -145,12 +145,12 @@ impl ToStmts for RvvBlock {
                 }
                 RvvInst::Add256(dvreg, svreg1, svreg2) => {
                     // println!("[asm] add256 {}, {}, {}", dvreg, svreg1, svreg2);
-                    let [b0, b1, b2, b3] = VInst::VaddVv {
+                    let [b0, b1, b2, b3] = VInst::VaddVv(Ivv {
                         vd: VReg::from_u8(*dvreg),
                         vs2: VReg::from_u8(*svreg2),
                         vs1: VReg::from_u8(*svreg1),
                         vm: false,
-                    }
+                    })
                     .encode_bytes();
                     quote! {
                         unsafe {
@@ -163,17 +163,37 @@ impl ToStmts for RvvBlock {
                 }
                 RvvInst::Sub256(dvreg, svreg1, svreg2) => {
                     // println!("[asm] sub256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    let [b0, b1, b2, b3] = VInst::VsubVv(Ivv {
+                        vd: VReg::from_u8(*dvreg),
+                        vs2: VReg::from_u8(*svreg2),
+                        vs1: VReg::from_u8(*svreg1),
+                        vm: false,
+                    })
+                    .encode_bytes();
                     quote! {
                         unsafe {
-                            asm!(".byte 0x32, 0x33, 0x34, 0x35")
+                            asm!(
+                                ".byte {0}, {1}, {2}, {3}",
+                                const #b0, const #b1, const #b2, const #b3,
+                            )
                         }
                     }
                 }
                 RvvInst::Rem256(dvreg, svreg1, svreg2) => {
                     // println!("[asm] rem256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    let [b0, b1, b2, b3] = VInst::VremuVv(Ivv {
+                        vd: VReg::from_u8(*dvreg),
+                        vs2: VReg::from_u8(*svreg2),
+                        vs1: VReg::from_u8(*svreg1),
+                        vm: false,
+                    })
+                    .encode_bytes();
                     quote! {
                         unsafe {
-                            asm!(".byte 0x33, 0x33, 0x34, 0x35")
+                            asm!(
+                                ".byte {0}, {1}, {2}, {3}",
+                                const #b0, const #b1, const #b2, const #b3,
+                            )
                         }
                     }
                 }
