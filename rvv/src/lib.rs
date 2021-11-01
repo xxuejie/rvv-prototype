@@ -210,6 +210,7 @@ impl RvvTransformer {
                 let (var_name, _) = self.v_registers.search_reg(dvreg).unwrap();
                 Ok(var_name)
             }
+            Expr::Paren(expr_paren) => self.resolve_expr(&expr_paren.expr, insts),
             _ => Err(format!("Unexpected expr: {:?}", expr)),
         }
     }
