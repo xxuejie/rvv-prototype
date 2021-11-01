@@ -245,7 +245,8 @@ impl ToStmts for RvvBlock {
                         }
                     } else {
                         quote! {
-                            let #var_numext_data: [u8; 32] = #var_numext.into();
+                            let mut #var_numext_data = [0u8; 32];
+                            #var_numext.to_little_endian(&mut #var_numext_data);
                             let #var = U256::from_le_bytes(&#var_numext_data);
                             #var
                         }
