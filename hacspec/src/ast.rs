@@ -1,3 +1,5 @@
+// This code is mainly copied from: https://github.com/hacspec/hacspec/blob/7530be1720f14f3d4848c6f26ad5bbc2eb23f3e1/language/src/rustspec.rs
+
 use core::cmp::{Eq, Ord, Ordering, PartialEq};
 use core::hash::{Hash, Hasher};
 use im::HashSet;
@@ -201,9 +203,10 @@ impl fmt::Debug for TypVar {
 
 #[derive(Clone, Hash, PartialEq, Eq, Serialize)]
 pub enum BaseTyp {
-    // NOTE: u256/i256 types are newly added.
+    // NOTE: u256/u512/u1024 types are newly added.
     UInt256,
-    Int256,
+    UInt512,
+    UInt1024,
 
     Unit,
     Bool,
@@ -236,7 +239,8 @@ impl fmt::Display for BaseTyp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BaseTyp::UInt256 => write!(f, "u256"),
-            BaseTyp::Int256 => write!(f, "i256"),
+            BaseTyp::UInt512 => write!(f, "u512"),
+            BaseTyp::UInt1024 => write!(f, "u1024"),
 
             BaseTyp::Unit => write!(f, "unit"),
             BaseTyp::Bool => write!(f, "bool"),

@@ -56,8 +56,11 @@ fn bn256_add(
     // let x = d * c;     // case.2: simple op, with temporary variable
     // let y = ax >= by;  // case.3: compare, with temporary variable
     // a += c;            // case.4: simple op, then assgin to exists variable
+    let dx = bx - ax;
+    bx = bx * cx;
     ax = bx + cx; // case.5: simple mod op
                   // -c                 // TODO case.6: return nagetive value
+    ax = ax % dx;
     ax
     // return;            // TODO case.7: early return
     // if y {             // TODO case.8: if else
@@ -92,8 +95,7 @@ fn program_entry() -> i8 {
         bx, // by, bz,
         cx, // cy, cz
     );
-    debug!("f: {:?}", f);
-    assert_eq!(f, U256([4830, 9216, 17971, 22357]));
+    assert_eq!(f, U256([204914, 1819081, 18446744073705256681u64, 2953]));
     // assert_eq!(f, U256([750280, 2317561, 4780776, 8205460]));
     0
 }
