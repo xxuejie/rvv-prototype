@@ -1,5 +1,5 @@
 use hacspec::ast::{
-    HacspecSpan,
+    rvv_vectorSpan,
     Spanned,
     LocalIdent,
     TopLevelIdent,
@@ -63,20 +63,20 @@ fn translate_type_args(args: &syn::AngleBracketedGenericArguments) -> Result<Vec
                 //     Const(Expr),
                 // }
                 syn::GenericArgument::Lifetime(_) => {
-                    bail!("lifetime type parameters are not allowed in Hacspect: {:?}", span);
+                    bail!("lifetime type parameters are not allowed in rvv_vectort: {:?}", span);
                 }
                 syn::GenericArgument::Type(ty) => {
                     let (type_arg, _) = translate_base_typ(ty, span)?;
                     Ok((type_arg, span))
                 }
                 syn::GenericArgument::Binding(binding) => {
-                    bail!("associated type parameters are not allowed in Hacspect: {:?}", binding.ident.span());
+                    bail!("associated type parameters are not allowed in rvv_vectort: {:?}", binding.ident.span());
                 }
                 syn::GenericArgument::Constraint(constraint) => {
-                    bail!("associated type parameters are not allowed in Hacspect: {:?}", constraint.ident.span());
+                    bail!("associated type parameters are not allowed in rvv_vectort: {:?}", constraint.ident.span());
                 }
                 syn::GenericArgument::Const(expr) => {
-                    bail!("const generics are not allowed in Hacspec: {:?}", span);
+                    bail!("const generics are not allowed in rvv_vector: {:?}", span);
                 }
             }
         })
@@ -105,10 +105,10 @@ fn translate_base_typ(ty: &syn::Type, span: &Span) -> Result<Spanned<BaseTyp>> {
     match ty {
         syn::Type::Path(syn::TypePath { qself, path }) => {
             if qself.is_some() {
-                bail!("trait associated types not allowed in Hacspec: {:?}", span);
+                bail!("trait associated types not allowed in rvv_vector: {:?}", span);
             }
             if path.segments.len() > 1 {
-                bail!("multiple path segments not allowed in Hacspec: {:?}", span);
+                bail!("multiple path segments not allowed in rvv_vector: {:?}", span);
             }
             match path.segments.first() {
                 Some(seg) => {
@@ -143,11 +143,11 @@ fn translate_base_typ(ty: &syn::Type, span: &Span) -> Result<Spanned<BaseTyp>> {
                             Ok((BaseTyp::Named(name, Some(arg)), span))
                         }
                         syn::PathArguments::Parenthesized(_) => {
-                            bail!("parenthesized path arguments are not allowed in Hacspec: {:?}", span);
+                            bail!("parenthesized path arguments are not allowed in rvv_vector: {:?}", span);
                         }
                     }
                 }
-                None => bail!("empty path are not allowed in Hacspec: {:?}", span),
+                None => bail!("empty path are not allowed in rvv_vector: {:?}", span),
             }
         }
         syn::Type::Tuple(syn::TypeTuple { paren_token, elems }) => {
@@ -159,10 +159,10 @@ fn translate_base_typ(ty: &syn::Type, span: &Span) -> Result<Spanned<BaseTyp>> {
             Ok((BaseTyp::Tuple(rtys), span.into()))
         }
         syn::Type::Reference(_) => {
-            bail!("double references not allowed in Hacspec");
+            bail!("double references not allowed in rvv_vector");
         }
         _ => {
-            bail!("type not allowed in Hacspec: {:?}", span);
+            bail!("type not allowed in rvv_vector: {:?}", span);
         }
     }
 }
@@ -174,7 +174,7 @@ fn translate_typ(ty: &syn::Type, span: &Span) -> Result<Spanned<Typ>> {
         syn::Type::Reference(type_ref) => {
             let span = type_ref.and_token.spans[0];
             if type_ref.lifetime.is_some() {
-                bail!("lifetime annotations are not allowed in Hacspec");
+                bail!("lifetime annotations are not allowed in rvv_vector");
             } else if type_ref.is_mut() {
                 bail!("mutable function arguments are not allowed");
             } else {
@@ -183,6 +183,18 @@ fn translate_typ(ty: &syn::Type, span: &Span) -> Result<Spanned<Typ>> {
         }
         _ => translate_base_typ(ty)
     }
+}
+
+fn translate_literal(lit: &syn::ExprLit, span: &Span) -> Result<Spanned<ExprTranslationResult>> {
+    unimplemented!()
+}
+
+fn translate_expr_name(path: &syn::Path, span: &Span) -> Result<Spanned<ExprTranslationResult>> {
+    unimplemented!()
+}
+
+fn translate_binop(x: &syn::BinOp) -> BinOpKind {
+    unimplemented!()
 }
 
 fn translate_expr(expr: &syn::Expr, span: &Span) -> Result<Spanned<ExprTranslationResult>> {
@@ -232,118 +244,140 @@ fn translate_expr(expr: &syn::Expr, span: &Span) -> Result<Spanned<ExprTranslati
 
     match expr {
         syn::Expr::Binary(expr_binary) => {
-            
+            Ok((ExprTranslationResult::TransExpr(Expression::Binary(
+                (translate_binop(&expr_binary.op, span.into())),
+                Box::new(translate_expr_expects_exp(&expr_binary.left, span)?),
+                Box::new(translate_expr_expects_exp(&expr_binary.right, span)?),
+                None,
+            ))))
         },
         syn::Expr::Unary(expr_unary) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Path(expr_path) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Call(expr_call) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::MethodCall(expr_methodcall) => {
-            
+            // FIXME:
+            unimplemented!()
         },
-        syn::Expr::Lit(expr_lit) => {
-            
-        },
+        syn::Expr::Lit(expr_lit) => translate_literal(expr_lit, span),
         syn::Expr::Assign(expr_assign) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::If(expr_if) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::ForLoop(expr_forloop) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Index(expr_index) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Tuple(expr_tuple) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Struct(expr_struct) => {
-
+            Err(anyhow!("structs are not supported yet in rvv_vector: {}", span));
         },
         syn::Expr::Box(expr_box) => {
-
+            Err(anyhow!("boxing is not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Array(expr_array) => {
+            // FIXME:
+            unimplemented!()
         }
         syn::Expr::Cast(expr_cast) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Type(expr_type) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Let(expr_let) => {
-            
+            Err(anyhow!("inline lets are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::While(expr_while) => {
-            
+            Err(anyhow!("while loops are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Loop(expr_loop) => {
-            
+            Err(anyhow!("undecorated loops are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Match(expr_match) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Closure(expr_closure) => {
-            
+            Err(anyhow!("closures are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Block(expr_block) => {
-            
+            Err(anyhow!("inline blocks are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Async(expr_async) => {
-            
+            Err(anyhow!("async/await statements are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Await(expr_await) => {
-            
+            Err(anyhow!("async/await statements are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::TryBlock(expr_tryblock) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::AssignOp(expr_assignop) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Field(expr_field) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Range(expr_range) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Reference(expr_reference) => {
-            
+            // FIXME:
+            unimplemented!()
         },
         syn::Expr::Break(expr_break) => {
-            
+            Err(anyhow!("break statements are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Continue(expr_continue) => {
-            
+            Err(anyhow!("early return statements are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Return(expr_return) => {
-            
+            Err(anyhow!("early return statements are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Macro(expr_macro) => {
+            Err(anyhow!("macro calls are not allowed in rvv_vector: {}", span));
         },
         syn::Expr::Repeat(expr_repeat) => {
-            // TODO: allow array
-            Err(anyhow!("repeat statements are not allowed in Hacspec: {}", span))
+            Err(anyhow!("repeat statements are not allowed in rvv_vector: {}", span))
         },
         syn::Expr::Yield(expr_yield) => {
-            Err(anyhow!("yield statements are not allowed in Hacspec: {}", span))
+            Err(anyhow!("yield statements are not allowed in rvv_vector: {}", span))
         },
         syn::Expr::Paren(expr_paren) => translate_expr(&expr_paren.expr, &expr_paren.paren_token.span),
         syn::Expr::Try(expr_try) => {
-            Err(anyhow!("question marks inside expressions are not allowed in Hacspec: {}", span))
+            Err(anyhow!("question marks inside expressions are not allowed in rvv_vector: {}", span))
         },
         syn::Expr::Group(expr_group) => {
-            Err(anyhow!("syn::ExprGroup are not allowed in Hacspec: {}", span))
+            Err(anyhow!("syn::ExprGroup are not allowed in rvv_vector: {}", span))
         },
         syn::Expr::Unsafe(expr_unsafe) => {
-            Err(anyhow!("unsafe blocks are not allowed in Hacspec: {}", span))
+            Err(anyhow!("unsafe blocks are not allowed in rvv_vector: {}", span))
         },
         syn::Expr::Verbatim(token_stream) => {
             Err(anyhow!("Tokens in expression position not interpreted by Syn: {}", span))
@@ -355,9 +389,14 @@ fn translate_expr_expects_exp(expr: &syn::Expr, span: &Span) -> Result<Spanned<E
     match translate_expr(expr, span)? {
         (ExprTranslationResult::TransExpr(e), span) => Ok((e, span)),
         (ExprTranslationResult::TransStmt(_), span) => {
-            Err(anyhow!("statements inside expressions are not allowed in Hacspec: {}", span))
+            Err(anyhow!("statements inside expressions are not allowed in rvv_vector: {}", span))
         }
     }
+}
+
+fn translate_struct_name(path: &syn::Path, span: &Span) -> Result<TopLevelIdent> {
+    // FIXME:
+    unimplemented!()
 }
 
 fn translate_expr_accepts_question_mark(
@@ -370,7 +409,7 @@ fn translate_expr_accepts_question_mark(
             match result {
                 ExprTranslationResult::TransExpr(e) => Ok((ExprTranslationResultMaybeQuestionMark::TransExpr(e, true), span)),
                 ExprTranslationResult::TransStmt(_) => {
-                    Err(anyhow!("question-marked blobs cannot contain statements in Hacspec, only pure expressions: {}", span))
+                    Err(anyhow!("question-marked blobs cannot contain statements in rvv_vector, only pure expressions: {}", span))
                 }
             }
         }
@@ -403,10 +442,10 @@ fn translate_pattern(pat: &syn::Pat, span: &Span) -> Result<(Spanned<Pattern>, O
             //     pub subpat: Option<(At, Box<Pat>)>,
             // }
             if pat_ident.by_ref.is_some() {
-                bail!("pattern not allowed in Hacspec let bindings: {}", Hacspec::from(span));
+                bail!("pattern not allowed in rvv_vector let bindings: {}", rvv_vector::from(span));
             }
             if pat_ident.subpat.is_some() {
-                bail!("pattern not allowed in Hacspec let bindings: {}", Hacspec::from(span));
+                bail!("pattern not allowed in rvv_vector let bindings: {}", rvv_vector::from(span));
             }
             let (ident, span) = translate_ident(pat_ident.ident);
             Ok(((Pattern::IdentPat(ident), span), None))
@@ -414,19 +453,40 @@ fn translate_pattern(pat: &syn::Pat, span: &Span) -> Result<(Spanned<Pattern>, O
         syn::Pat::Type(pat_type) => {
             let (pattern, typ_opt) = translate_pattern(pat_type.pat, pat_type.colon_token.spans[0])?;
             if type_opt.is_some() {
-                bail!("pattern not allowed in Hacspec let bindings: {}", Hacspec::from(span));
+                bail!("pattern not allowed in rvv_vector let bindings: {}", rvv_vector::from(span));
             }
             let typ = translate_typ(pat_type.ty)?;
             Ok(pattern, Some(typ))
         }
         syn::Pat::Tuple(pat_tuple) => {
+            let span = pat_tuple.paren_token.span;
+            let pats = pat_tuple
+                .elems
+                .iter()
+                .map(|pat| translate_pattern(pat, &span))
+                .collect::<Result<Vec<_>>>()?;
+            Ok((Pattern::Tuple(pats), span))
         }
         syn::Pat::TupleStruct(pat_tuple_struct) => {
+            let struct_name = translate_struct_name(&pat_tuple_struct.path, span)?;
+            let ts_span = pat_tuple_struct.pat.paren_token.span;
+            let pattern = if pat_tuple_struct.pat.elems.len() == 1 {
+                translate_pattern(pat_tuple_struct.pat.elems.first().unwrap(), ts_span)?
+            } else {
+                let pats = pat_tuple_struct.pat.
+                    .elems
+                    .iter()
+                    .map(|pat| translate_pattern(pat, &ts_span))
+                    .collect::<Result<Vec<_>>>()?;
+                (Pattern::Tuple(pats), ts_span)
+            };
+            Ok((Pattern::SingleCaseEnum((struct_name, span.into()), Box::new(pattern))))
         }
         syn::Pat::Wild(pat_wild) => {
+            Ok((Pattern::WildCard, span.into()))
         }
         _ => {
-            bail!("pattern not allowed in Hacspec let bindings: {}", Hacspec::from(span));
+            bail!("pattern not allowed in rvv_vector let bindings: {}", rvv_vector::from(span));
         }
     }
 }
@@ -438,12 +498,11 @@ fn translate_statement(stmt: &syn::Stmt) -> Result<Spanned<Statement>> {
             let span = &let_token.span;
             let (pat, ty) = translate_pattern(pat, span)?;
             match init {
-                None => bail!("let-bindings without initialization are not allowed in Hacspec: {}", span);
-                Some((eq, expr)) => {
-                }
+                None => bail!("let-bindings without initialization are not allowed in rvv_vector: {}", span);
+                Some((eq, expr)) => {}
             }
         }
-        syn::Stmt::Item(item) => bail!("block-local items are not allowed in Hacspec"),
+        syn::Stmt::Item(item) => bail!("block-local items are not allowed in rvv_vector"),
         syn::Stmt::Expr(expr) => {
         }
         syn::Stmt::Semi(expr, _semi) => {
@@ -498,24 +557,24 @@ fn translate_item(item: &syn::Item) -> Result<Item> {
         }
         */
         syn::Item::Fn(syn::ItemFn {sig, block, ..}) => {
-            let sig_span = HacspecSpan::from(sig.ident.span());
+            let sig_span = rvv_vectorSpan::from(sig.ident.span());
             if sig.unsafety.is_some() {
-                bail!("unsafe functions not allowed in Hacspec: {}", sig_span);
+                bail!("unsafe functions not allowed in rvv_vector: {}", sig_span);
             }
             if sig.asyncness.is_some() {
-                bail!("async functions not allowed in Hacspec: {}", sig_span);
+                bail!("async functions not allowed in rvv_vector: {}", sig_span);
             }
             if sig.constness.is_some() {
-                bail!("const functions not allowed in Hacspec: {}", sig_span);
+                bail!("const functions not allowed in rvv_vector: {}", sig_span);
             }
             if sig.abi.is_some() {
-                bail!("extern functions not allowed in Hacspec: {}", sig_span);
+                bail!("extern functions not allowed in rvv_vector: {}", sig_span);
             }
             if sig.variadic.is_some() {
-                bail!("variadic functions not allowed in Hacspec: {}", sig_span);
+                bail!("variadic functions not allowed in rvv_vector: {}", sig_span);
             }
             if !sig.generics.params.is_empty() {
-                bail!("generics are not allowed in Hacspec: {}", sig_span);
+                bail!("generics are not allowed in rvv_vector: {}", sig_span);
             }
             let fn_inputs = sig
                 .inputs
@@ -530,12 +589,12 @@ fn translate_item(item: &syn::Item) -> Result<Item> {
                                     Ok((id, ty))
                                 }
                                 _ => {
-                                    Err(anyhow!("pattern destructuring in function arguments not allowed in Hacspec"))
+                                    Err(anyhow!("pattern destructuring in function arguments not allowed in rvv_vector"))
                                 }
                             }
                         }
                         _ => {
-                            Err(anyhow!("pattern destructuring in function arguments not allowed in Hacspec"))
+                            Err(anyhow!("pattern destructuring in function arguments not allowed in rvv_vector"))
                         }
                     }
                 })
