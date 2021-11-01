@@ -75,7 +75,7 @@ impl ToStmts for RvvBlock {
         for inst in &self.insts {
             let token_stream = match inst {
                 RvvInst::Load256(vreg, var_name) => {
-                    println!("[asm] load256 {}, {}", vreg, var_name);
+                    // println!("[asm] load256 {}, {}", vreg, var_name);
                     let var = format_ident!("{}", var_name);
                     // vle256.v v1, (t0)
                     let [b0, b1, b2, b3] = VInst::VleV {
@@ -97,7 +97,7 @@ impl ToStmts for RvvBlock {
                     }
                 }
                 RvvInst::Store256(vreg, var_name) => {
-                    println!("[asm] store256 {}, {}", vreg, var_name);
+                    // println!("[asm] store256 {}, {}", vreg, var_name);
                     let var = format_ident!("{}", var_name);
                     let var_buf = format_ident!("buf_{}", buf_counter);
                     buf_counter += 1;
@@ -126,7 +126,7 @@ impl ToStmts for RvvBlock {
                     }
                 }
                 RvvInst::Mul256(dvreg, svreg1, svreg2) => {
-                    println!("[asm] mul256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    // println!("[asm] mul256 {}, {}, {}", dvreg, svreg1, svreg2);
                     let [b0, b1, b2, b3] = VInst::VmulVv {
                         vd: VReg::from_u8(*dvreg),
                         vs2: VReg::from_u8(*svreg2),
@@ -144,7 +144,7 @@ impl ToStmts for RvvBlock {
                     }
                 }
                 RvvInst::Add256(dvreg, svreg1, svreg2) => {
-                    println!("[asm] add256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    // println!("[asm] add256 {}, {}, {}", dvreg, svreg1, svreg2);
                     let [b0, b1, b2, b3] = VInst::VaddVv {
                         vd: VReg::from_u8(*dvreg),
                         vs2: VReg::from_u8(*svreg2),
@@ -162,7 +162,7 @@ impl ToStmts for RvvBlock {
                     }
                 }
                 RvvInst::Sub256(dvreg, svreg1, svreg2) => {
-                    println!("[asm] sub256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    // println!("[asm] sub256 {}, {}, {}", dvreg, svreg1, svreg2);
                     quote! {
                         unsafe {
                             asm!(".byte 0x32, 0x33, 0x34, 0x35")
@@ -170,7 +170,7 @@ impl ToStmts for RvvBlock {
                     }
                 }
                 RvvInst::Rem256(dvreg, svreg1, svreg2) => {
-                    println!("[asm] rem256 {}, {}, {}", dvreg, svreg1, svreg2);
+                    // println!("[asm] rem256 {}, {}, {}", dvreg, svreg1, svreg2);
                     quote! {
                         unsafe {
                             asm!(".byte 0x33, 0x33, 0x34, 0x35")
@@ -179,7 +179,7 @@ impl ToStmts for RvvBlock {
                 }
                 RvvInst::Ge256(dxreg, dvreg, svreg1, svreg2) => {
                     // FIXME: store result as bool or u256 ???
-                    println!("[asm] ge256 {}, {}, {}, {}", dxreg, dvreg, svreg1, svreg2);
+                    // println!("[asm] ge256 {}, {}, {}, {}", dxreg, dvreg, svreg1, svreg2);
                     quote! {
                         unsafe {
                             asm!(".byte 0x34, 0x33, 0x34, 0x35")

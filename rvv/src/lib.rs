@@ -128,7 +128,7 @@ impl RvvTransformer {
         // x or v register
         dreg_opt: Option<u8>,
     ) -> Result<(RvvInst, u8), String> {
-        println!(">> {} {:?} {}", left_ident, op, right_ident);
+        // println!(">> {} {:?} {}", left_ident, op, right_ident);
         let (svreg1, _) = self.v_registers.get_reg(left_ident)?;
         let (svreg2, _) = self.v_registers.get_reg(right_ident)?;
         if let Some((dvreg, inst)) = match op {
@@ -329,10 +329,10 @@ impl Fold for RvvTransformer {
                                 .v_registers
                                 .next_register()
                                 .expect("No available register!");
-                            println!(
-                                "[register] mapping variable {} to V register {}",
-                                var_name, vreg
-                            );
+                            // println!(
+                            //     "[register] mapping variable {} to V register {}",
+                            //     var_name, vreg
+                            // );
                             self.v_registers.insert(var_name, (vreg, false));
                             let (new_insts, _dvreg) =
                                 self.handle_binary_op(left, op, right, Some(vreg)).unwrap();
@@ -398,8 +398,8 @@ impl Fold for RvvTransformer {
 
 #[proc_macro_attribute]
 pub fn rvv_vector(attr: TokenStream, item: TokenStream) -> TokenStream {
-    println!("attr: \"{}\"", attr.to_string());
-    println!("item: \"{}\"", item.to_string());
+    // println!("attr: \"{}\"", attr.to_string());
+    // println!("item: \"{}\"", item.to_string());
     let input = parse_macro_input!(item as ItemFn);
     let mut transformer = RvvTransformer::default();
     let output = transformer.fold_item_fn(input);
