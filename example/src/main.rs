@@ -57,7 +57,7 @@ fn bn256_add(
     // let y = ax >= by;  // case.3: compare, with temporary variable
     // a += c;            // case.4: simple op, then assgin to exists variable
     let dx = bx - ax;
-    bx = bx * cx;
+    bx = bx >> cx;
     ax = bx + cx; // case.5: simple mod op
                   // -c                 // TODO case.6: return nagetive value
     ax = ax % dx;

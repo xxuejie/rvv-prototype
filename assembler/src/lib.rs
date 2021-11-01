@@ -32,6 +32,10 @@ pub enum RvvInst {
     Sub256(u8, u8, u8),
     // (vd, vs1, vs2)
     Rem256(u8, u8, u8),
+    // (vd, vs1, vs2)
+    Sll256(u8, u8, u8),
+    // (vd, vs1, vs2)
+    Srl256(u8, u8, u8),
     // (rd, vd, vs1, vs2)
     Ge256(u8, u8, u8, u8),
     // Keep the original normal statement
@@ -197,6 +201,12 @@ impl ToStmts for RvvBlock {
                         }
                     }
                 }
+                RvvInst::Sll256(dvreg, svreg1, svreg2) => {
+                    unimplemented!()
+                }
+                RvvInst::Srl256(dvreg, svreg1, svreg2) => {
+                    unimplemented!()
+                }
                 RvvInst::Ge256(dxreg, dvreg, svreg1, svreg2) => {
                     // FIXME: store result as bool or u256 ???
                     // println!("[asm] ge256 {}, {}, {}, {}", dxreg, dvreg, svreg1, svreg2);
@@ -294,6 +304,36 @@ impl ToStmts for RvvBlock {
                         used_idents.insert(var_dst.clone());
                         quote! {
                             let (mut #var_dst, _) = #var_numext1.overflowing_sub(#var_numext2);
+                        }
+                    }
+                }
+                RvvInst::Sll256(dvreg, svreg1, svreg2) => {
+                    let var_dst = tmp_ident(*dvreg);
+                    let var_numext1 = tmp_ident(*svreg1);
+                    let var_numext2 = tmp_ident(*svreg2);
+                    if used_idents.contains(&var_dst) {
+                        quote! {
+                            #var_dst = #var_numext2 << #var_numext1;
+                        }
+                    } else {
+                        used_idents.insert(var_dst.clone());
+                        quote! {
+                            let (mut #var_dst, _) = #var_numext2 << #var_numext1;
+                        }
+                    }
+                }
+                RvvInst::Srl256(dvreg, svreg1, svreg2) => {
+                    let var_dst = tmp_ident(*dvreg);
+                    let var_numext1 = tmp_ident(*svreg1);
+                    let var_numext2 = tmp_ident(*svreg2);
+                    if used_idents.contains(&var_dst) {
+                        quote! {
+                            #var_dst = #var_numext2 >> #var_numext1;
+                        }
+                    } else {
+                        used_idents.insert(var_dst.clone());
+                        quote! {
+                            let (mut #var_dst, _) = #var_numext2 >> #var_numext1;
                         }
                     }
                 }

@@ -176,6 +176,18 @@ impl RvvTransformer {
                 let inst = RvvInst::Rem256(dvreg, svreg1, svreg2);
                 Some((dvreg, inst))
             }
+            BinOp::Shl(_) => {
+                let dvreg = dreg_opt
+                    .unwrap_or_else(|| self.v_registers.next_register().expect("no register"));
+                let inst = RvvInst::Sll256(dvreg, svreg1, svreg2);
+                Some((dvreg, inst))
+            }
+            BinOp::Shr(_) => {
+                let dvreg = dreg_opt
+                    .unwrap_or_else(|| self.v_registers.next_register().expect("no register"));
+                let inst = RvvInst::Srl256(dvreg, svreg1, svreg2);
+                Some((dvreg, inst))
+            }
             BinOp::Ge(_) => {
                 let dxreg = dreg_opt
                     .unwrap_or_else(|| self.x_registers.next_register().expect("no register"));
