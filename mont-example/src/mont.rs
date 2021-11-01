@@ -68,7 +68,7 @@ pub fn reduce(np1: U256, n: U256, t: U256) -> U256 {
 #[rvv_vector]
 #[no_mangle]
 pub fn to_mont(r: U256, n: U256, x: U256) -> U256 {
-    x * r % n
+    (x * r) % n
 }
 
 #[rvv_vector]
