@@ -60,9 +60,9 @@ impl Mont {
 #[no_mangle]
 pub fn reduce(np1: U256, n: U256, t: U256) -> U256 {
     let m = t * np1;
-    // not supported
-    // (t + m * n) >> 32
-    t + m * n
+    let m2: u32 = m.into();
+    let m3: U256 = m2.into();
+    (t + m3 * n) >> 32
 }
 
 #[rvv_vector]
@@ -77,9 +77,6 @@ pub fn multi(np1: U256, n: U256, x: U256, y: U256) -> U256 {
     let xy = x * y;
     let m = xy * np1;
     let res = xy + m * n;
-    // not supported
-    // res >> 32
-
     // not implemented yet
     //  let res = reduce(xy);
     // if res > mont.n {
@@ -87,7 +84,7 @@ pub fn multi(np1: U256, n: U256, x: U256, y: U256) -> U256 {
     // } else {
     //     res
     // }
-    res
+    res >> 32
 }
 
 pub fn mont_main() {
@@ -113,18 +110,24 @@ pub fn mont_main() {
         mont.np1, mont.n, x2, y2
     );
     let xy2 = multi(mont.np1.clone(), mont.n.clone(), x2, y2);
-    debug!("{:?}", xy2);
+    debug!("xy2 = {:?}", xy2);
 
-    let xy2: u64 = xy2.into();
-    let xy2 = xy2 >> 32;
+    let mont_n: u64 = mont.n.clone().into();
+    let mut xy2: u64 = xy2.into();
+    if xy2 > mont_n {
+        xy2 = xy2 - mont_n;
+    }
 
     // into normal form
     let xy = reduce(mont.np1.clone(), mont.n.clone(), xy2.into());
+    debug!("xy = {:?}", xy);
+
     let xy: u64 = xy.into();
-    let xy = xy >> 32;
+    if xy > mont_n {
+        xy = xy - mont_n;
+    }
 
     // workaround
     // the result should be same
-    let n: u64 = mont.n.into();
-    assert_eq!(xy, (x * y) % n);
+    assert_eq!(xy, (x * y) % mont_n);
 }
