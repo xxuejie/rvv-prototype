@@ -54,7 +54,7 @@ impl ToStmts for RvvBlock {
         let mut stmts = Vec::new();
         let mut buf_counter: u16 = 0;
         let vsetvli_ts = {
-            // vsetvli  x0, t0, e256, m1, ta, ma
+            // vsetvli x0, t0, e256, m1, ta, ma
             let [b0, b1, b2, b3] = VInst::Vsetvli {
                 rd: XReg::Zero,
                 rs1: XReg::T0,
