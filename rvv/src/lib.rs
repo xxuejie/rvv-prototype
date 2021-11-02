@@ -8,6 +8,8 @@ use syn::{
     ExprPath, FnArg, Ident, ItemFn, Local, Pat, PatIdent, PatType, Stmt, Type,
 };
 
+mod ast;
+
 // use hacspec::ast;
 // mod syn_to_hacspec;
 
