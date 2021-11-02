@@ -41,14 +41,21 @@ impl Mont {
     }
 
     pub fn precompute(&mut self) {
-        let r: u64 = self.r.clone().into();
-        let n: u64 = self.n.clone().into();
-        let (gcd, np, rp) = egcd(n as i64, r as i64);
+        let r : u64 = self.r.clone().into();
+        let n : u64 = self.n.clone().into();
+ 
+        let r = r as i64;
+        let n = n as i64;
+        let (gcd, np, rp) = egcd(n, r);
         assert_eq!(gcd, 1);
-        let rp1_temp = if rp < 0 { -rp as u64 } else { rp as u64 };
-        self.rp1 = rp1_temp.into();
-        let np1_temp = if np < 0 { -np as u64 } else { np as u64 };
-        self.np1 = np1_temp.into();
+
+        let rp1 = rp + n;
+        assert!(rp1 >= 0);
+        self.rp1 = (rp1 as u64).into();
+
+        let np1 = r - np;
+        assert!(np1 >= 0);
+        self.np1 = (np1 as u64).into();
     }
 }
 
@@ -122,7 +129,7 @@ pub fn mont_main() {
     let xy = reduce(mont.np1.clone(), mont.n.clone(), xy2.into());
     debug!("xy = {:?}", xy);
 
-    let xy: u64 = xy.into();
+    let mut xy: u64 = xy.into();
     if xy > mont_n {
         xy = xy - mont_n;
     }
