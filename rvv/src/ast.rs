@@ -4,7 +4,8 @@ use std::convert::TryFrom;
 use std::fmt;
 
 use anyhow::{anyhow, bail, Error};
-use proc_macro2::Span as SynSpan;
+use proc_macro2::{Span as SynSpan, TokenStream};
+use quote::ToTokens;
 
 pub struct Span(pub SynSpan);
 
@@ -61,6 +62,104 @@ impl From<SynSpan> for Span {
 
 pub type Spanned<T> = (T, Span);
 
+// pub struct Lifetime {
+//     pub apostrophe: Span,
+//     pub ident: Ident,
+// }
+
+// pub struct BareFnArg {
+//     pub attrs: Vec<Attribute>,
+//     pub name: Option<(Ident, Colon)>,
+//     pub ty: Type,
+// }
+// An argument in a function type: the usize in fn(usize) -> bool.
+pub struct BareFnArg {
+    name: Option<syn::Ident>,
+    ty: Type,
+}
+
+// pub enum Type {
+//     Array(TypeArray),
+//     BareFn(TypeBareFn),
+//     Group(TypeGroup),
+//     ImplTrait(TypeImplTrait),
+//     Infer(TypeInfer),
+//     Macro(TypeMacro),
+//     Never(TypeNever),
+//     Paren(TypeParen),
+//     Path(TypePath),
+//     Ptr(TypePtr),
+//     Reference(TypeReference),
+//     Slice(TypeSlice),
+//     TraitObject(TypeTraitObject),
+//     Tuple(TypeTuple),
+//     Verbatim(TokenStream),
+//     // some variants omitted
+// }
+pub enum Type {
+    // pub struct TypeArray {
+    //     pub bracket_token: Bracket,
+    //     pub elem: Box<Type>,
+    //     pub semi_token: Semi,
+    //     pub len: Expr,
+    // }
+    // A fixed size array type: [T; n].
+    Array {
+        elem: Box<Type>,
+        len: Expression,
+    },
+
+    // pub struct TypeBareFn {
+    //     pub lifetimes: Option<BoundLifetimes>,
+    //     pub unsafety: Option<Unsafe>,
+    //     pub abi: Option<Abi>,
+    //     pub fn_token: Fn,
+    //     pub paren_token: Paren,
+    //     pub inputs: Punctuated<BareFnArg, Comma>,
+    //     pub variadic: Option<Variadic>,
+    //     pub output: ReturnType,
+    // }
+    // A bare function type: fn(usize) -> bool.
+    BareFn {
+        inputs: Vec<BareFnArg>,
+        output: syn::ReturnType,
+    },
+
+    // pub struct TypePath {
+    //     pub qself: Option<QSelf>,
+    //     pub path: Path,
+    // }
+    // A path like std::slice::Iter, optionally qualified with a self-type as in <Vec<T> as SomeTrait>::Associated.
+    Path(syn::Path),
+
+    // pub struct TypeReference {
+    //     pub and_token: And,
+    //     pub lifetime: Option<Lifetime>,
+    //     pub mutability: Option<Mut>,
+    //     pub elem: Box<Type>,
+    // }
+    // A reference type: &'a T or &'a mut T.
+    Reference {
+        mutability: bool,
+        lifetime: Option<syn::Ident>,
+        elem: Box<Type>,
+    },
+
+    // pub struct TypeSlice {
+    //     pub bracket_token: Bracket,
+    //     pub elem: Box<Type>,
+    // }
+    // A dynamically sized slice type: [T].
+    Slice(Box<Type>),
+
+    // pub struct TypeTuple {
+    //     pub paren_token: Paren,
+    //     pub elems: Punctuated<Type, Comma>,
+    // }
+    // A tuple type: (A, B, C, String).
+    Tuple(Vec<Type>),
+}
+
 // pub enum Pat {
 //     Box(PatBox),
 //     Ident(PatIdent),
@@ -94,6 +193,18 @@ pub enum Pattern {
         ident: syn::Ident,
     },
 
+    // pub struct PatType {
+    //     pub attrs: Vec<Attribute>,
+    //     pub pat: Box<Pat>,
+    //     pub colon_token: Colon,
+    //     pub ty: Box<Type>,
+    // }
+    // A type ascription pattern: foo: f64.
+    Type {
+        pat: Box<Pattern>,
+        ty: Box<Type>,
+    },
+
     // pub struct PatRange {
     //     pub attrs: Vec<Attribute>,
     //     pub lo: Box<Expr>,
@@ -113,9 +224,7 @@ pub enum Pattern {
     //     pub path: Path,
     // }
     // A path pattern like Color::Red
-    Path {
-        path: syn::Path,
-    },
+    Path(syn::Path),
 
     // pub struct PatWild {
     //     pub attrs: Vec<Attribute>,
@@ -202,6 +311,31 @@ pub enum Expression {
         right: Box<Expression>,
     },
 
+    // pub struct ExprBinary {
+    //     pub attrs: Vec<Attribute>,
+    //     pub left: Box<Expr>,
+    //     pub op: BinOp,
+    //     pub right: Box<Expr>,
+    // }
+    // A binary operation: a + b, a * b.
+    Binary {
+        left: Box<Expression>,
+        op: syn::BinOp,
+        right: Box<Expression>,
+    },
+
+    // pub struct ExprType {
+    //     pub attrs: Vec<Attribute>,
+    //     pub expr: Box<Expr>,
+    //     pub colon_token: Colon,
+    //     pub ty: Box<Type>,
+    // }
+    // TODO: A type ascription expression: foo: f64.
+    // Type {
+    //     expr: Box<Expression>,
+    //     ty: Box<syn::Type>,
+    // },
+
     // pub struct ExprCall {
     //     pub attrs: Vec<Attribute>,
     //     pub func: Box<Expr>,
@@ -237,19 +371,6 @@ pub enum Expression {
     // A macro invocation expression: format!("{}", q).
     Macro(syn::Macro),
 
-    // pub struct ExprBinary {
-    //     pub attrs: Vec<Attribute>,
-    //     pub left: Box<Expr>,
-    //     pub op: BinOp,
-    //     pub right: Box<Expr>,
-    // }
-    // A binary operation: a + b, a * b.
-    Binary {
-        left: Box<Expression>,
-        op: syn::BinOp,
-        right: Box<Expression>,
-    },
-
     // pub struct ExprUnary {
     //     pub attrs: Vec<Attribute>,
     //     pub op: UnOp,
@@ -282,7 +403,7 @@ pub enum Expression {
     // A cast expression: foo as f64.
     Cast {
         expr: Box<Expression>,
-        ty: Box<syn::Type>,
+        ty: Box<Type>,
     },
 
     // pub struct ExprRepeat {
@@ -313,6 +434,19 @@ pub enum Expression {
     // A parenthesized expression: (a + b).
     Paren(Box<Expression>),
 
+    // pub struct ExprReference {
+    //     pub attrs: Vec<Attribute>,
+    //     pub and_token: And,
+    //     pub raw: Reserved,
+    //     pub mutability: Option<Mut>,
+    //     pub expr: Box<Expr>,
+    // }
+    // A referencing operation: &a or &mut a.
+    Reference {
+        mutability: bool,
+        expr: Box<Expression>,
+    },
+
     // pub struct ExprIndex {
     //     pub attrs: Vec<Attribute>,
     //     pub expr: Box<Expr>,
@@ -331,9 +465,7 @@ pub enum Expression {
     //     pub path: Path,
     // }
     // A path like std::mem::replace possibly containing generic parameters and a qualified self-type.
-    Path {
-        path: syn::Path,
-    },
+    Path(syn::Path),
 
     // ==== control flow ====
     // pub struct ExprBreak {
@@ -435,6 +567,25 @@ pub struct Block {
     pub stmts: Vec<Statement>,
 }
 
+// pub struct PatType {
+//     pub attrs: Vec<Attribute>,
+//     pub pat: Box<Pat>,
+//     pub colon_token: Colon,
+//     pub ty: Box<Type>,
+// }
+// pub enum FnArg {
+//     Receiver(Receiver),
+//     Typed(PatType),
+// }
+pub struct FnArg {
+    pat: Box<Pattern>,
+    ty: Box<Type>,
+}
+
+// pub enum ReturnType {
+//     Default,
+//     Type(RArrow, Box<Type>),
+// }
 // pub struct Signature {
 //     pub constness: Option<Const>,
 //     pub asyncness: Option<Async>,
@@ -451,7 +602,7 @@ pub struct Block {
 // A function signature in a implementation: fn initialize(a: T).
 pub struct Signature {
     pub ident: syn::Ident,
-    pub inputs: Vec<(Pattern, syn::Type)>,
+    pub inputs: Vec<FnArg>,
     pub output: syn::ReturnType,
 }
 
@@ -468,31 +619,411 @@ pub struct ItemFn {
     pub block: Block,
 }
 
+// ============================
+// ==== impl TryFrom for T ====
+// ============================
+impl TryFrom<&syn::BareFnArg> for BareFnArg {
+    type Error = Error;
+    fn try_from(bare_fn_arg: &syn::BareFnArg) -> Result<BareFnArg, Error> {
+        let name = bare_fn_arg.name.as_ref().map(|(ident, _)| (*ident).clone());
+        let ty = Type::try_from(&bare_fn_arg.ty)?;
+        Ok(BareFnArg { name, ty })
+    }
+}
+
+impl TryFrom<&syn::Type> for Type {
+    type Error = Error;
+    fn try_from(ty: &syn::Type) -> Result<Type, Error> {
+        match ty {
+            syn::Type::Array(syn::TypeArray { elem, len, ..}) => {
+                let elem = Box::new(Type::try_from(&**elem)?);
+                let len = Expression::try_from(len)?;
+                Ok(Type::Array { elem, len })
+            },
+            syn::Type::BareFn(syn::TypeBareFn { lifetimes, unsafety, abi, inputs, variadic, output, .. }) => {
+                if lifetimes.is_some() {
+                    bail!("lifetime in bare function type is not supported in rvv_vector");
+                }
+                if unsafety.is_some() {
+                    bail!("unsafe bare function type is not supported in rvv_vector");
+                }
+                if abi.is_some() {
+                    bail!("extern \"C\" in bare function type is not supported in rvv_vector");
+                }
+                if variadic.is_some() {
+                    bail!("variadic argument in bare function type is not supported in rvv_vector");
+                }
+                let inputs = inputs.iter()
+                    .map(BareFnArg::try_from)
+                    .collect::<Result<Vec<_>, Error>>()?;
+                let output = (*output).clone();
+                Ok(Type::BareFn { inputs, output })
+            },
+            syn::Type::Group(_) => {
+                Err(anyhow!("type contained within invisible delimiters is not supported in rvv_vector"))
+            },
+            syn::Type::ImplTrait(_) => {
+                Err(anyhow!("impl Trait type is not supported in rvv_vector"))
+            },
+            syn::Type::Infer(_) => {
+                Err(anyhow!("type should be inferred by the compiler is not supported in rvv_vector"))
+            },
+            syn::Type::Macro(_) => {
+                Err(anyhow!("macro in the type position is not supported in rvv_vector"))
+            },
+            syn::Type::Never(_) => {
+                Err(anyhow!("never type(!) is not supported in rvv_vector"))
+            },
+            syn::Type::Paren(syn::TypeParen{ elem, .. }) => {
+                // pub struct TypeParen {
+                //     pub paren_token: Paren,
+                //     pub elem: Box<Type>,
+                // }
+                Ok(Type::try_from(&**elem)?)
+            },
+            syn::Type::Path(syn::TypePath { qself, path }) => {
+                if qself.is_some() {
+                    bail!("self-type in path type is not supported in rvv_vector");
+                }
+                Ok(Type::Path((*path).clone()))
+            },
+            syn::Type::Ptr(_) => {
+                Err(anyhow!("raw pointer type is not supported in rvv_vector"))
+            },
+            syn::Type::Reference(syn::TypeReference{ lifetime, mutability, elem, .. }) => {
+                let lifetime = lifetime.as_ref().map(|lifetime| lifetime.ident.clone());
+                let mutability = mutability.is_some();
+                let elem = Box::new(Type::try_from(&**elem)?);
+                Ok(Type::Reference { mutability, lifetime, elem })
+            },
+            syn::Type::Slice(syn::TypeSlice{ elem, .. }) => {
+                let elem = Box::new(Type::try_from(&**elem)?);
+                Ok(Type::Slice(elem))
+            },
+            syn::Type::TraitObject(_) => {
+                Err(anyhow!("trait object type is not supported in rvv_vector"))
+            },
+            syn::Type::Tuple(syn::TypeTuple { elems, .. }) => {
+                let elems = elems.iter()
+                    .map(Type::try_from)
+                    .collect::<Result<Vec<_>, Error>>()?;
+                Ok(Type::Tuple(elems))
+            },
+            syn::Type::Verbatim(_) => {
+                Err(anyhow!("Tokens in type position that not interpreted by syn is not supported in rvv_vector"))
+            },
+            // some variants omitted
+            ty => {
+                Err(anyhow!("all other kind of type is not supported in rvv_vector: {:?}", ty))
+            }
+        }
+    }
+}
+
 impl TryFrom<&syn::Pat> for Pattern {
     type Error = Error;
-    fn try_from(expr: &syn::Pat) -> Result<Pattern, Error> {
-        unimplemented!()
+    fn try_from(pat: &syn::Pat) -> Result<Pattern, Error> {
+        match pat {
+            syn::Pat::Box(_) => {
+                Err(anyhow!("box pattern is not supported in rvv_vector"))
+            },
+            syn::Pat::Ident(syn::PatIdent { by_ref, mutability, ident, subpat, .. }) => {
+                if by_ref.is_some() {
+                    bail!("ref pattern is not supported in rvv_vector");
+                }
+                if subpat.is_some() {
+                    bail!("sub-pattern is not supported in rvv_vector");
+                }
+                let mutability = mutability.is_some();
+                let ident = (*ident).clone();
+                Ok(Pattern::Ident{ mutability, ident })
+            },
+            syn::Pat::Lit(_) => {
+                Err(anyhow!("literal pattern is not supported in rvv_vector"))
+            },
+            syn::Pat::Macro(_) => {
+                Err(anyhow!("macro in pattern position is not supported in rvv_vector"))
+            },
+            syn::Pat::Or(_) => {
+                Err(anyhow!("pattern that matches more than one case is not supported in rvv_vector"))
+            },
+            syn::Pat::Path(syn::PatPath { qself, path, .. }) => {
+                if qself.is_some() {
+                    bail!("self-type in path pattern is not supported in rvv_vector");
+                }
+                Ok(Pattern::Path((*path).clone()))
+            },
+            syn::Pat::Range(syn::PatRange { lo, limits, hi, .. }) => {
+                let lo = Box::new(Expression::try_from(&**lo)?);
+                let hi = Box::new(Expression::try_from(&**hi)?);
+                let limits = (*limits).clone();
+                Ok(Pattern::Range { lo, limits, hi })
+            },
+            syn::Pat::Reference(_) => {
+                Err(anyhow!("reference pattern is not supported in rvv_vector"))
+            },
+            syn::Pat::Rest(_) => {
+                Err(anyhow!("dots in a tuple or slice pattern is not supported in rvv_vector"))
+            },
+            syn::Pat::Slice(_) => {
+                Err(anyhow!("dynamically sized slice pattern is not supported in rvv_vector"))
+            },
+            syn::Pat::Struct(_) => {
+                Err(anyhow!("struct or struct variant pattern is not supported in rvv_vector"))
+            },
+            syn::Pat::Tuple(_) => {
+                Err(anyhow!("tuple pattern is not supported in rvv_vector"))
+            },
+            syn::Pat::TupleStruct(_) => {
+                Err(anyhow!("tuple struct or tuple variant pattern is not supported in rvv_vector"))
+            },
+            syn::Pat::Type(syn::PatType { pat, ty, .. }) => {
+                let pat = Box::new(Pattern::try_from(&**pat)?);
+                let ty = Box::new(Type::try_from(&**ty)?);
+                Ok(Pattern::Type { pat, ty })
+            },
+            syn::Pat::Verbatim(_) => {
+                Err(anyhow!("Tokens in pattern position that not interpreted by syn is not supported in rvv_vector"))
+            },
+            syn::Pat::Wild(_) => {
+                Ok(Pattern::Wild)
+            },
+            pat => {
+                Err(anyhow!("all other kind of pattern is not supported in rvv_vector: {:?}", pat))
+            }
+        }
     }
 }
 
 impl TryFrom<&syn::Expr> for Expression {
     type Error = Error;
     fn try_from(expr: &syn::Expr) -> Result<Expression, Error> {
-        unimplemented!()
+        match expr {
+            syn::Expr::Array(expr_array) => {
+                Ok(Expression::Array(expr_array.clone()))
+            }
+            syn::Expr::Assign(syn::ExprAssign { left, right, .. }) => {
+                let left = Box::new(Expression::try_from(&**left)?);
+                let right = Box::new(Expression::try_from(&**right)?);
+                Ok(Expression::Assign { left, right})
+            },
+            syn::Expr::AssignOp(syn::ExprAssignOp { left, op, right, ..}) => {
+                let left = Box::new(Expression::try_from(&**left)?);
+                let right = Box::new(Expression::try_from(&**right)?);
+                let op = (*op).clone();
+                Ok(Expression::AssignOp { left, op, right})
+            },
+            syn::Expr::Async(_) => {
+                Err(anyhow!("async block is not supported in rvv_vector"))
+            },
+            syn::Expr::Await(_) => {
+                Err(anyhow!("await expression is not supported in rvv_vector"))
+            },
+            syn::Expr::Binary(syn::ExprBinary { left, op, right, ..}) => {
+                let left = Box::new(Expression::try_from(&**left)?);
+                let right = Box::new(Expression::try_from(&**right)?);
+                let op = (*op).clone();
+                Ok(Expression::Binary { left, op, right})
+            },
+            syn::Expr::Block(_) => {
+                Err(anyhow!("blocked scope is not supported in rvv_vector"))
+            },
+            syn::Expr::Box(_) => {
+                Err(anyhow!("box expression is not supported in rvv_vector"))
+            },
+            syn::Expr::Break(_) => {
+                Ok(Expression::Break)
+            },
+            syn::Expr::Call(syn::ExprCall { func, args, .. }) => {
+                let func = Box::new(Expression::try_from(&**func)?);
+                let args = args.iter()
+                    .map(Expression::try_from)
+                    .collect::<Result<Vec<_>, Error>>()?;
+                Ok(Expression::Call { func, args })
+            },
+            syn::Expr::Cast(syn::ExprCast { expr, ty, .. }) => {
+                let expr = Box::new(Expression::try_from(&**expr)?);
+                let ty = Box::new(Type::try_from(&**ty)?);
+                Ok(Expression::Cast { expr, ty })
+            },
+            syn::Expr::Closure(_) => {
+                Err(anyhow!("closure expression is not supported in rvv_vector"))
+            },
+            syn::Expr::Continue(_) => {
+                Ok(Expression::Continue)
+            },
+            syn::Expr::Field(syn::ExprField { base, member, .. }) => {
+                let base = Box::new(Expression::try_from(&**base)?);
+                let member = (*member).clone();
+                Ok(Expression::Field { base, member })
+            },
+            syn::Expr::ForLoop(syn::ExprForLoop { label, pat, expr, body, .. }) => {
+                if label.is_some() {
+                    bail!("label in for loop is not supported in rvv_vector");
+                }
+                let pat = Pattern::try_from(pat)?;
+                let expr = Box::new(Expression::try_from(&**expr)?);
+                let body = Block::try_from(body)?;
+                Ok(Expression::ForLoop { pat, expr, body })
+            },
+            syn::Expr::Group(_) => {
+                Err(anyhow!("expression contained within invisible delimiters is not supported in rvv_vector"))
+            },
+            syn::Expr::If(syn::ExprIf { cond, then_branch, else_branch, ..}) => {
+                let cond = Box::new(Expression::try_from(&**cond)?);
+                let then_branch = Block::try_from(then_branch)?;
+                let else_branch = else_branch
+                    .as_ref()
+                    .map::<Result<_, Error>, _>(|(_, expr)| Ok(Box::new(Expression::try_from(&**expr)?)))
+                    .transpose()?;
+                Ok(Expression::If { cond, then_branch, else_branch })
+            },
+            syn::Expr::Index(syn::ExprIndex { expr, index, .. }) => {
+                let expr = Box::new(Expression::try_from(&**expr)?);
+                let index = Box::new(Expression::try_from(&**index)?);
+                Ok(Expression::Index { expr, index })
+            },
+            syn::Expr::Let(_) => {
+                Err(anyhow!("let guard is not supported in rvv_vector"))
+            },
+            syn::Expr::Lit(syn::ExprLit{ lit, .. }) => {
+                Ok(Expression::Lit((*lit).clone()))
+            },
+            syn::Expr::Loop(syn::ExprLoop{ label, body, .. }) => {
+                if label.is_some() {
+                    bail!("label in loop is not supported in rvv_vector");
+                }
+                let body = Block::try_from(body)?;
+                Ok(Expression::Loop(body))
+            },
+            syn::Expr::Macro(syn::ExprMacro { mac, .. }) => {
+                Ok(Expression::Macro((*mac).clone()))
+            },
+            syn::Expr::Match(_) => {
+                Err(anyhow!("match expression is not supported in rvv_vector"))
+            },
+            syn::Expr::MethodCall(syn::ExprMethodCall { receiver, method, turbofish, args, .. }) => {
+                if turbofish.is_some() {
+                    bail!("explicit type parameters passed to a method call is not supported in rvv_vector");
+                }
+                let receiver = Box::new(Expression::try_from(&**receiver)?);
+                let method = (*method).clone();
+                let args = args.iter()
+                    .map(Expression::try_from)
+                    .collect::<Result<Vec<_>, Error>>()?;
+                Ok(Expression::MethodCall { receiver, method, args })
+            },
+            syn::Expr::Paren(syn::ExprParen { expr, .. }) => {
+                Ok(Expression::try_from(&**expr)?)
+            },
+            syn::Expr::Path(syn::ExprPath{ qself, path, .. }) => {
+                if qself.is_some() {
+                    bail!("explicit Self type in a qualified path is not supported in rvv_vector");
+                }
+                Ok(Expression::Path((*path).clone()))
+            },
+            syn::Expr::Range(_) => {
+                Err(anyhow!("range expression is not supported in rvv_vector"))
+            },
+            syn::Expr::Reference(syn::ExprReference{ mutability, expr, .. }) => {
+                let mutability = mutability.is_some();
+                let expr = Box::new(Expression::try_from(&**expr)?);
+                Ok(Expression::Reference { mutability, expr })
+            },
+            syn::Expr::Repeat(syn::ExprRepeat { expr, len, .. }) => {
+                let expr = Box::new(Expression::try_from(&**expr)?);
+                let len = Box::new(Expression::try_from(&**len)?);
+                Ok(Expression::Repeat { expr, len })
+            },
+            syn::Expr::Return(syn::ExprReturn { expr, .. }) => {
+                let expr_opt = expr
+                    .as_ref()
+                    .map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?)))
+                    .transpose()?;
+                Ok(Expression::Return(expr_opt))
+            },
+            syn::Expr::Struct(_) => {
+                Err(anyhow!("struct literal expression is not supported in rvv_vector"))
+            },
+            syn::Expr::Try(_) => {
+                Err(anyhow!("try-expression is not supported in rvv_vector"))
+            },
+            syn::Expr::TryBlock(_) => {
+                Err(anyhow!("try block is not supported in rvv_vector"))
+            },
+            syn::Expr::Tuple(_) => {
+                Err(anyhow!("tuple expression is not supported in rvv_vector"))
+            },
+            syn::Expr::Type(_) => {
+                Err(anyhow!("type ascription expression is not supported in rvv_vector"))
+            },
+            syn::Expr::Unary(syn::ExprUnary { op, expr, .. }) => {
+                let op = (*op).clone();
+                let expr = Box::new(Expression::try_from(&**expr)?);
+                Ok(Expression::Unary { op, expr })
+            },
+            syn::Expr::Unsafe(_) => {
+                Err(anyhow!("unsafe block is not supported in rvv_vector"))
+            },
+            syn::Expr::Verbatim(_) => {
+                Err(anyhow!("Tokens in expression position that not interpreted by syn is not supported in rvv_vector"))
+            },
+            syn::Expr::While(_) => {
+                Err(anyhow!("while loop is not supported in rvv_vector"))
+            },
+            syn::Expr::Yield(_) => {
+                Err(anyhow!("yield expression is not supported in rvv_vector"))
+            },
+            expr => {
+                Err(anyhow!("all other kind of expression is not supported in rvv_vector: {:?}", expr))
+            }
+        }
     }
 }
 
 impl TryFrom<&syn::Stmt> for Statement {
     type Error = Error;
     fn try_from(stmt: &syn::Stmt) -> Result<Statement, Error> {
-        unimplemented!()
+        match stmt {
+            syn::Stmt::Local(syn::Local { pat, init, .. }) => {
+                let pat = Pattern::try_from(pat)?;
+                let init = init
+                    .as_ref()
+                    .map(|(_, expr)| Expression::try_from(&**expr))
+                    .transpose()?;
+                Ok(Statement::Local { pat, init })
+            }
+            syn::Stmt::Item(_) => Err(anyhow!("item definition is not supported in rvv_vector")),
+            syn::Stmt::Expr(expr) => Ok(Statement::Expr(Expression::try_from(expr)?)),
+            syn::Stmt::Semi(expr, _) => Ok(Statement::Semi(Expression::try_from(expr)?)),
+        }
     }
 }
 
 impl TryFrom<&syn::Block> for Block {
     type Error = Error;
     fn try_from(block: &syn::Block) -> Result<Block, Error> {
-        unimplemented!()
+        let stmts = block
+            .stmts
+            .iter()
+            .map(Statement::try_from)
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(Block { stmts })
+    }
+}
+
+impl TryFrom<&syn::FnArg> for FnArg {
+    type Error = Error;
+    fn try_from(fn_arg: &syn::FnArg) -> Result<FnArg, Error> {
+        match fn_arg {
+            syn::FnArg::Receiver(_) => {
+                Err(anyhow!("method function is not supported in rvv_vector"))
+            }
+            syn::FnArg::Typed(syn::PatType { pat, ty, .. }) => Ok(FnArg {
+                pat: Box::new(Pattern::try_from(&**pat)?),
+                ty: Box::new(Type::try_from(&**ty)?),
+            }),
+        }
     }
 }
 
@@ -517,7 +1048,16 @@ impl TryFrom<&syn::Signature> for Signature {
         if sig.variadic.is_some() {
             bail!("variadic argument is not supported by rvv_vector");
         }
-        unimplemented!()
+        let inputs = sig
+            .inputs
+            .iter()
+            .map(FnArg::try_from)
+            .collect::<Result<Vec<_>, Error>>()?;
+        Ok(Signature {
+            ident: sig.ident.clone(),
+            inputs,
+            output: sig.output.clone(),
+        })
     }
 }
 
@@ -530,5 +1070,14 @@ impl TryFrom<&syn::ItemFn> for ItemFn {
             sig: Signature::try_from(&item_fn.sig)?,
             block: Block::try_from(&*item_fn.block)?,
         })
+    }
+}
+
+// =============================
+// ==== impl ToTokens for T ====
+// =============================
+impl ToTokens for ItemFn {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        unimplemented!();
     }
 }
