@@ -9,6 +9,7 @@ use syn::{
 };
 
 mod ast;
+use ast::Registers;
 
 // use hacspec::ast;
 // mod syn_to_hacspec;
@@ -52,56 +53,6 @@ mod ast;
 //   Ord          Trait for types that form a total order.
 //   PartialEq    Trait for equality comparisons which are partial equivalence relations.
 //   PartialOrd   Trait for values that can be compared for a sort-order.
-
-#[derive(Default)]
-struct Registers {
-    category: &'static str,
-    max_number: u8,
-    last_number: u8,
-    // ident_name => (register_number, is_function_argument)
-    mapping: HashMap<String, (u8, bool)>,
-}
-
-impl Registers {
-    fn new(category: &'static str, max_number: u8) -> Registers {
-        Registers {
-            category,
-            max_number,
-            last_number: 0,
-            mapping: HashMap::default(),
-        }
-    }
-
-    fn next_register(&mut self) -> Option<u8> {
-        if self.last_number < self.max_number {
-            self.last_number += 1;
-            let tmp_var_name = format!("__tmp_{}_var{}", self.category, self.last_number);
-            self.mapping.insert(tmp_var_name, (self.last_number, false));
-            return Some(self.last_number);
-        }
-        None
-    }
-
-    fn search_reg(&self, reg: u8) -> Option<(String, bool)> {
-        for (name, (number, is_fn_arg)) in &self.mapping {
-            if *number == reg {
-                return Some((name.clone(), *is_fn_arg));
-            }
-        }
-        None
-    }
-
-    fn get_reg(&self, var_name: &str) -> Result<(u8, bool), String> {
-        self.mapping
-            .get(var_name)
-            .cloned()
-            .ok_or_else(|| format!("Unrecognized {} variable name: {}", self.category, var_name))
-    }
-
-    fn insert(&mut self, var_name: String, value: (u8, bool)) {
-        self.mapping.insert(var_name, value);
-    }
-}
 
 struct RvvTransformer {
     // vector registers
