@@ -6,9 +6,10 @@ use std::fmt;
 
 use anyhow::{anyhow, bail, Error};
 use proc_macro2::{Span as SynSpan, TokenStream};
-use quote::ToTokens;
+use quote::{quote, ToTokens};
 use syn::token;
 
+#[derive(Debug)]
 pub struct Span(pub SynSpan);
 
 impl Ord for Span {
@@ -75,6 +76,7 @@ pub type Spanned<T> = (T, Span);
 //     pub ty: Type,
 // }
 // An argument in a function type: the usize in fn(usize) -> bool.
+#[derive(Debug)]
 pub struct BareFnArg {
     name: Option<syn::Ident>,
     ty: Type,
@@ -84,6 +86,7 @@ pub struct BareFnArg {
 //     Default,
 //     Type(RArrow, Box<Type>),
 // }
+#[derive(Debug)]
 pub enum ReturnType {
     Default,
     Type(Box<Type>),
@@ -107,6 +110,7 @@ pub enum ReturnType {
 //     Verbatim(TokenStream),
 //     // some variants omitted
 // }
+#[derive(Debug)]
 pub enum Type {
     // pub struct TypeArray {
     //     pub bracket_token: Bracket,
@@ -190,6 +194,7 @@ pub enum Type {
 //     Wild(PatWild),
 //     // some variants omitted
 // }
+#[derive(Debug)]
 pub enum Pattern {
     // pub struct PatIdent {
     //     pub attrs: Vec<Attribute>,
@@ -288,6 +293,7 @@ pub enum Pattern {
 //     Yield(ExprYield),
 //     // some variants omitted
 // }
+#[derive(Debug)]
 pub enum Expression {
     // pub struct ExprArray {
     //     pub attrs: Vec<Attribute>,
@@ -526,6 +532,19 @@ pub enum Expression {
         else_branch: Option<Box<Expression>>,
     },
 
+    // pub struct ExprRange {
+    //     pub attrs: Vec<Attribute>,
+    //     pub from: Option<Box<Expr>>,
+    //     pub limits: RangeLimits,
+    //     pub to: Option<Box<Expr>>,
+    // }
+    // A range expression: 1..2, 1.., ..2, 1..=2, ..=2.
+    Range {
+        from: Option<Box<Expression>>,
+        limits: syn::RangeLimits,
+        to: Option<Box<Expression>>,
+    },
+
     // pub struct ExprLoop {
     //     pub attrs: Vec<Attribute>,
     //     pub label: Option<Label>,
@@ -557,6 +576,7 @@ pub enum Expression {
 //     Expr(Expr),
 //     Semi(Expr, Semi),
 // }
+#[derive(Debug)]
 pub enum Statement {
     // pub struct Local {
     //     pub attrs: Vec<Attribute>,
@@ -579,6 +599,7 @@ pub enum Statement {
 //     pub stmts: Vec<Stmt>,
 // }
 // A braced block containing Rust statements.
+#[derive(Debug)]
 pub struct Block {
     pub stmts: Vec<Statement>,
 }
@@ -593,6 +614,7 @@ pub struct Block {
 //     Receiver(Receiver),
 //     Typed(PatType),
 // }
+#[derive(Debug)]
 pub struct FnArg {
     pat: Box<Pattern>,
     ty: Box<Type>,
@@ -612,6 +634,7 @@ pub struct FnArg {
 //     pub output: ReturnType,
 // }
 // A function signature in a implementation: fn initialize(a: T).
+#[derive(Debug)]
 pub struct Signature {
     pub ident: syn::Ident,
     pub inputs: Vec<FnArg>,
@@ -625,6 +648,7 @@ pub struct Signature {
 //     pub block: Box<Block>,
 // }
 // A free-standing function: fn process(n: usize) -> Result<()> { ... }.
+#[derive(Debug)]
 pub struct ItemFn {
     pub vis: syn::Visibility,
     pub sig: Signature,
@@ -951,8 +975,11 @@ impl TryFrom<&syn::Expr> for Expression {
                 }
                 Ok(Expression::Path((*path).clone()))
             },
-            syn::Expr::Range(_) => {
-                Err(anyhow!("range expression is not supported in rvv_vector"))
+            syn::Expr::Range(syn::ExprRange { from, limits, to, .. }) => {
+                let from = from.as_ref().map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?))).transpose()?;
+                let limits = (*limits).clone();
+                let to = to.as_ref().map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?))).transpose()?;
+                Ok(Expression::Range { from, limits, to })
             },
             syn::Expr::Reference(syn::ExprReference{ mutability, expr, .. }) => {
                 let mutability = mutability.is_some();
@@ -1163,6 +1190,7 @@ impl Registers {
     }
 }
 
+#[derive(Default)]
 pub struct Context {
     // vector registers
     v_registers: Registers,
@@ -1420,6 +1448,22 @@ impl ToTokenStream for Expression {
                     expr.to_tokens(tokens, context);
                 }
             }
+            Expression::Range { from, limits, to } => {
+                if let Some(expr) = from.as_ref() {
+                    expr.to_tokens(tokens, context);
+                }
+                match limits {
+                    syn::RangeLimits::HalfOpen(inner) => {
+                        inner.to_tokens(tokens);
+                    }
+                    syn::RangeLimits::Closed(inner) => {
+                        inner.to_tokens(tokens);
+                    }
+                }
+                if let Some(expr) = to.as_ref() {
+                    expr.to_tokens(tokens, context);
+                }
+            }
             Expression::Loop(body) => {
                 token::Loop::default().to_tokens(tokens);
                 body.to_tokens(tokens, context);
@@ -1490,5 +1534,56 @@ impl ToTokenStream for ItemFn {
         self.vis.to_tokens(tokens);
         self.sig.to_tokens(tokens, context);
         self.block.to_tokens(tokens, context);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn rvv_test(item: TokenStream) -> TokenStream {
+        let input: syn::ItemFn = syn::parse2(item).unwrap();
+        let out = ItemFn::try_from(&input).unwrap();
+        let mut tokens = TokenStream::new();
+        let mut context = Context::default();
+        out.to_tokens(&mut tokens, &mut context);
+        println!("out: {:#?}", out);
+        TokenStream::from(quote!(#tokens))
+    }
+
+    #[test]
+    fn test_simple() {
+        let input = quote! {
+            fn simple(x: u32, mut y: u64, z: &mut u64) -> u128 {
+                *z += 3;
+                if z > 5 {
+                    y = y * 6;
+                } else {
+                    y = y * 3;
+                }
+                y = y >> 1;
+                for i in 0..6 {
+                    if i == 3 {
+                        continue;
+                    }
+                    z += 1;
+                    if z > 6 {
+                        break;
+                    }
+                }
+                let rv = if z > 6 {
+                    (x as u64) + y + *z
+                } else {
+                    (x as u64) * y + *z
+                };
+                (rv + 3) as u128
+            }
+        };
+        let input_string = input.to_string();
+        println!("[input ]: {}", input_string);
+        let output = rvv_test(input);
+        let output_string = output.to_string();
+        println!("[otuput]: {}", output_string);
+        assert_eq!(input_string, output_string);
     }
 }
