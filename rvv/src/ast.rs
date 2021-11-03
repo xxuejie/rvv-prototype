@@ -7,9 +7,10 @@ use std::fmt;
 use anyhow::{anyhow, bail, Error};
 use proc_macro2::{Span as SynSpan, TokenStream};
 use quote::{quote, ToTokens};
+use rvv_assembler::{Imm, Ivi, Ivv, Ivx, Uimm, VConfig, VInst, VReg, Vlmul, Vtypei, XReg};
 use syn::token;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Span(pub SynSpan);
 
 impl Ord for Span {
@@ -76,7 +77,7 @@ pub type Spanned<T> = (T, Span);
 //     pub ty: Type,
 // }
 // An argument in a function type: the usize in fn(usize) -> bool.
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BareFnArg {
     name: Option<syn::Ident>,
     ty: Type,
@@ -86,7 +87,7 @@ pub struct BareFnArg {
 //     Default,
 //     Type(RArrow, Box<Type>),
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum ReturnType {
     Default,
     Type(Box<Type>),
@@ -110,7 +111,7 @@ pub enum ReturnType {
 //     Verbatim(TokenStream),
 //     // some variants omitted
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Type {
     // pub struct TypeArray {
     //     pub bracket_token: Bracket,
@@ -194,7 +195,7 @@ pub enum Type {
 //     Wild(PatWild),
 //     // some variants omitted
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Pattern {
     // pub struct PatIdent {
     //     pub attrs: Vec<Attribute>,
@@ -250,6 +251,23 @@ pub enum Pattern {
     Wild,
 }
 
+// Type information can come from:
+//    1. function arguments
+//    2. local let binding
+//    3. type cast
+//    4. type infer
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct TypedExpression {
+    expr: Expression,
+    ty: Option<Type>,
+}
+
+impl From<Expression> for TypedExpression {
+    fn from(expr: Expression) -> TypedExpression {
+        TypedExpression { expr, ty: None }
+    }
+}
+
 // pub enum Expr {
 //     Array(ExprArray),
 //     Assign(ExprAssign),
@@ -293,7 +311,7 @@ pub enum Pattern {
 //     Yield(ExprYield),
 //     // some variants omitted
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Expression {
     // pub struct ExprArray {
     //     pub attrs: Vec<Attribute>,
@@ -570,13 +588,36 @@ pub enum Expression {
     },
 }
 
+impl Expression {
+    fn get_type(&self, variables: &HashMap<syn::Ident, (bool, Type)>) -> Option<Type> {
+        match self {
+            Expression::Binary { left, right, .. } => {
+                let left_type = left.get_type(variables);
+                let right_type = right.get_type(variables);
+                if left_type == right_type {
+                    left_type
+                } else {
+                    None
+                }
+            }
+            Expression::Paren(expr) => expr.get_type(variables),
+            Expression::Reference { expr, .. } => expr.get_type(variables),
+            Expression::Path(path) => match path.get_ident() {
+                Some(ident) => variables.get(ident).map(|(_, ty)| ty.clone()),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 // pub enum Stmt {
 //     Local(Local),
 //     Item(Item),
 //     Expr(Expr),
 //     Semi(Expr, Semi),
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Statement {
     // pub struct Local {
     //     pub attrs: Vec<Attribute>,
@@ -599,7 +640,7 @@ pub enum Statement {
 //     pub stmts: Vec<Stmt>,
 // }
 // A braced block containing Rust statements.
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Block {
     pub stmts: Vec<Statement>,
 }
@@ -614,9 +655,10 @@ pub struct Block {
 //     Receiver(Receiver),
 //     Typed(PatType),
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct FnArg {
-    pat: Box<Pattern>,
+    mutability: bool,
+    name: syn::Ident,
     ty: Box<Type>,
 }
 
@@ -634,7 +676,7 @@ pub struct FnArg {
 //     pub output: ReturnType,
 // }
 // A function signature in a implementation: fn initialize(a: T).
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Signature {
     pub ident: syn::Ident,
     pub inputs: Vec<FnArg>,
@@ -648,7 +690,7 @@ pub struct Signature {
 //     pub block: Box<Block>,
 // }
 // A free-standing function: fn process(n: usize) -> Result<()> { ... }.
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ItemFn {
     pub vis: syn::Visibility,
     pub sig: Signature,
@@ -1048,6 +1090,18 @@ impl TryFrom<&syn::Stmt> for Statement {
                     );
                 }
                 let pat = Pattern::try_from(pat)?;
+                match &pat {
+                    Pattern::Ident { .. } => {}
+                    Pattern::Type { pat, .. } => match &**pat {
+                        Pattern::Ident { .. } => {}
+                        _ => {
+                            bail!("complex local let binding is not supported in rvv_vector");
+                        }
+                    },
+                    _ => {
+                        bail!("complex local let binding is not supported in rvv_vector");
+                    }
+                }
                 let init = init
                     .as_ref()
                     .map(|(_, expr)| Expression::try_from(&**expr))
@@ -1081,10 +1135,19 @@ impl TryFrom<&syn::FnArg> for FnArg {
             syn::FnArg::Receiver(_) => {
                 Err(anyhow!("method function is not supported in rvv_vector"))
             }
-            syn::FnArg::Typed(syn::PatType { pat, ty, .. }) => Ok(FnArg {
-                pat: Box::new(Pattern::try_from(&**pat)?),
-                ty: Box::new(Type::try_from(&**ty)?),
-            }),
+            syn::FnArg::Typed(syn::PatType { pat, ty, .. }) => {
+                let (mutability, name) = match Pattern::try_from(&**pat)? {
+                    Pattern::Ident { mutability, ident } => (mutability, ident),
+                    _ => {
+                        bail!("complex pattern in function argument is not supported in rvv_vector")
+                    }
+                };
+                Ok(FnArg {
+                    mutability,
+                    name,
+                    ty: Box::new(Type::try_from(&**ty)?),
+                })
+            }
         }
     }
 }
@@ -1134,6 +1197,19 @@ impl TryFrom<&syn::ItemFn> for ItemFn {
             block: Block::try_from(&*item_fn.block)?,
         })
     }
+}
+
+// ================================
+// ==== impl TypeChecker for T ====
+// ================================
+// Extra Rules:
+//   1. variable shadowing is forbidden
+pub trait TypeChecker {
+    // infer(by fill TypedExpression.ty field) and check types
+    fn check_types(
+        &mut self,
+        var_context: &mut HashMap<syn::Ident, (bool, Type)>,
+    ) -> Result<(), Error>;
 }
 
 // =============================
@@ -1196,6 +1272,15 @@ pub struct Context {
     v_registers: Registers,
     // general registers
     x_registers: Registers,
+
+    variables: HashMap<syn::Ident, (bool, Type)>,
+    // [When update v_config]
+    //   1. When first vector instruction used update v_config and insert asm!()
+    //   2. When vector config changed:
+    //     * reset x_registers
+    //     * dump all x register data to memory
+    //     * update v_config and insert asm!()
+    v_config: Option<VConfig>,
 }
 
 pub trait ToTokenStream {
@@ -1478,10 +1563,37 @@ impl ToTokenStream for Expression {
         }
     }
 }
+
 impl ToTokenStream for Statement {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
         match self {
             Statement::Local { pat, init } => {
+                match pat {
+                    Pattern::Ident { mutability, ident } => {
+                        if let Some(ty) = init.get_type(&context.variables) {
+                            if context
+                                .variables
+                                .insert((*ident).clone(), (*mutability, ty))
+                                .is_some()
+                            {
+                                panic!("variable shadowing is not supported in rvv_vector");
+                            }
+                        }
+                    }
+                    Pattern::Type { pat, ty } => match &**pat {
+                        Pattern::Ident { mutability, ident } => {
+                            if context
+                                .variables
+                                .insert((*ident).clone(), (*mutability, Type::clone(ty)))
+                                .is_some()
+                            {
+                                panic!("variable shadowing is not supported in rvv_vector");
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
                 token::Let::default().to_tokens(tokens);
                 pat.to_tokens(tokens, context);
                 token::Eq::default().to_tokens(tokens);
@@ -1509,7 +1621,10 @@ impl ToTokenStream for Block {
 }
 impl ToTokenStream for FnArg {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
-        self.pat.to_tokens(tokens, context);
+        if self.mutability {
+            token::Mut::default().to_tokens(tokens);
+        }
+        self.name.to_tokens(tokens);
         token::Colon::default().to_tokens(tokens);
         self.ty.to_tokens(tokens, context);
     }
@@ -1520,6 +1635,11 @@ impl ToTokenStream for Signature {
         self.ident.to_tokens(tokens);
         token::Paren::default().surround(tokens, |inner| {
             for (idx, input) in self.inputs.iter().enumerate() {
+                // let binding in signature
+                context.variables.insert(
+                    input.name.clone(),
+                    (input.mutability, Type::clone(&input.ty)),
+                );
                 input.to_tokens(inner, context);
                 if idx != self.inputs.len() - 1 {
                     token::Comma::default().to_tokens(inner);
@@ -1585,5 +1705,19 @@ mod test {
         let output_string = output.to_string();
         println!("[otuput]: {}", output_string);
         assert_eq!(input_string, output_string);
+    }
+
+    #[test]
+    fn test_u256() {
+        let input = quote! {
+            fn comp_u256(x: U256, y: U256) -> U256 {
+                let mut z: U256 = x + y * x;
+                z = z + z;
+                z
+            }
+        };
+        println!("[input ]: {}", input);
+        let output = rvv_test(input);
+        println!("[otuput]: {}", output);
     }
 }

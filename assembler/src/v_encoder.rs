@@ -1,14 +1,14 @@
 // 7 bit
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Vtypei(u8);
 // 5 bit
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Uimm(u8);
 // 5 bit
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Imm(u8);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Vlmul {
     // LMUL=1/8
@@ -90,7 +90,7 @@ x31     | t6       | temporary register 6                | no
 pc      | (none)   | program counter                     | n/a */
 
 // 5 bit
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum XReg {
     Zero = 0,
@@ -128,7 +128,7 @@ pub enum XReg {
 }
 
 // 5 bit
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum VReg {
     V0 = 0,
@@ -206,21 +206,21 @@ impl VReg {
 }
 
 /// Vector Integer Arithmetic Instructions data structures
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Ivv {
     pub vd: VReg,
     pub vs2: VReg,
     pub vs1: VReg,
     pub vm: bool,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Ivx {
     pub vd: VReg,
     pub vs2: VReg,
     pub rs1: XReg,
     pub vm: bool,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Ivi {
     pub vd: VReg,
     pub vs2: VReg,
@@ -279,9 +279,8 @@ impl Ivi {
     }
 }
 
-// 32 bit
-#[derive(Clone, Copy)]
-pub enum VInst {
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum VConfig {
     /// vsetvli  rd, rs1, vtypei  # rd = new vl, rs1 = AVL, vtypei = new vtype setting
     Vsetvli { rd: XReg, rs1: XReg, vtypei: Vtypei },
     /// vsetivli rd, uimm, vtypei # rd = new vl, uimm = AVL, vtypei = new vtype setting
@@ -292,6 +291,12 @@ pub enum VInst {
     },
     /// vsetvl   rd, rs1, rs2     # rd = new vl, rs1 = AVL, rs2 = new vtype value
     Vsetvl { rd: XReg, rs1: XReg, rs2: XReg },
+}
+
+// 32 bit
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum VInst {
+    VConfig(VConfig),
 
     // ==== Vector Integer Arithmetic Instructions ====
 
@@ -424,22 +429,24 @@ impl VInst {
             VInst::VremuVx(ivx) => {
                 return ivx.encode_u32(FUNCT6_VREMU);
             }
-            VInst::Vsetvli { rd, rs1, vtypei } => {
-                let funct3: u8 = FUNCT3_OPCFG;
-                let rest: u32 = vtypei.0 as u32;
-                (OP_V, rest, rs1 as u8, funct3, rd as u8)
-            }
-            VInst::Vsetivli { rd, uimm, vtypei } => {
-                let funct3: u8 = FUNCT3_OPCFG;
-                let mut rest: u32 = vtypei.0 as u32;
-                rest = set_bits(rest, 10, 0b11);
-                (OP_V, rest, uimm.0, funct3, rd as u8)
-            }
-            VInst::Vsetvl { rd, rs1, rs2 } => {
-                let funct3: u8 = FUNCT3_OPCFG;
-                let rest: u32 = set_bits(rs2 as u8 as u32, 5 + 6, 1);
-                (OP_V, rest, rs1 as u8, funct3, rd as u8)
-            }
+            VInst::VConfig(cfg) => match cfg {
+                VConfig::Vsetvli { rd, rs1, vtypei } => {
+                    let funct3: u8 = FUNCT3_OPCFG;
+                    let rest: u32 = vtypei.0 as u32;
+                    (OP_V, rest, rs1 as u8, funct3, rd as u8)
+                }
+                VConfig::Vsetivli { rd, uimm, vtypei } => {
+                    let funct3: u8 = FUNCT3_OPCFG;
+                    let mut rest: u32 = vtypei.0 as u32;
+                    rest = set_bits(rest, 10, 0b11);
+                    (OP_V, rest, uimm.0, funct3, rd as u8)
+                }
+                VConfig::Vsetvl { rd, rs1, rs2 } => {
+                    let funct3: u8 = FUNCT3_OPCFG;
+                    let rest: u32 = set_bits(rs2 as u8 as u32, 5 + 6, 1);
+                    (OP_V, rest, rs1 as u8, funct3, rd as u8)
+                }
+            },
             VInst::VleV { width, vd, rs1, vm } => {
                 let (funct3, mew) = width_bits(width);
                 let lumop: u8 = 0b00000;

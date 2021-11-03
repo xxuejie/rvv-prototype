@@ -11,7 +11,7 @@ use std::collections::HashSet;
 #[allow(dead_code)]
 mod v_encoder;
 #[allow(unused_imports)]
-use v_encoder::{Imm, Ivi, Ivv, Ivx, Uimm, VInst, VReg, Vlmul, Vtypei, XReg};
+pub use v_encoder::{Imm, Ivi, Ivv, Ivx, Uimm, VConfig, VInst, VReg, Vlmul, Vtypei, XReg};
 
 pub trait ToStmts {
     fn to_stmts(&self) -> Vec<Stmt>;
@@ -59,11 +59,11 @@ impl ToStmts for RvvBlock {
         let mut buf_counter: u16 = 0;
         let vsetvli_ts = {
             // vsetvli x0, t0, e256, m1, ta, ma
-            let [b0, b1, b2, b3] = VInst::Vsetvli {
+            let [b0, b1, b2, b3] = VInst::VConfig(VConfig::Vsetvli {
                 rd: XReg::Zero,
                 rs1: XReg::T0,
                 vtypei: Vtypei::new(256, Vlmul::M1, true, true),
-            }
+            })
             .encode_bytes();
             quote! {
                 unsafe {
