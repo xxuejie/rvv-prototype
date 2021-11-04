@@ -67,13 +67,20 @@ impl Registers {
 }
 
 #[derive(Default)]
-pub struct Context {
+pub struct CodegenContext {
     // vector registers
     v_registers: Registers,
     // general registers
     x_registers: Registers,
 
-    variables: HashMap<syn::Ident, (bool, Type)>,
+    // expr_id => register_number
+    expr_values: HashMap<usize, u8>,
+    // expr_id => ethereum_types::U256 variable name
+    expr_names: HashMap<usize, String>,
+    // FIXME: fill in current module
+    // ident => (mutability, Type)
+    variables: HashMap<syn::Ident, (bool, Box<Type>)>,
+
     // [When update v_config]
     //   1. When first vector instruction used update v_config and insert asm!()
     //   2. When vector config changed:
@@ -83,14 +90,62 @@ pub struct Context {
     v_config: Option<VConfig>,
 }
 
+impl CodegenContext {
+    pub fn new(variables: HashMap<syn::Ident, (bool, Box<Type>)>) -> CodegenContext {
+        CodegenContext {
+            v_registers: Registers::default(),
+            x_registers: Registers::default(),
+            expr_values: HashMap::default(),
+            variables,
+            v_config: None,
+        }
+    }
+
+    // Generate raw asm statements for top level expression
+    fn gen_asm_items(
+        &mut self,
+        left: &TypedExpression,
+        op: &syn::BinOp,
+        right: &TypedExpression,
+        v_config: &VConfig,
+        top_level: bool,
+    ) -> Vec<TokenStream> {
+        let mut tokens = Vec::new();
+        if self.v_config.as_ref() != Some(v_config) {
+            self.v_config = Some(v_config.clone());
+            // vsetvli x0, t0, e256, m1, ta, ma
+            let [b0, b1, b2, b3] = VInst::VConfig(v_config.clone()).encode_bytes();
+            tokens.push(quote! {
+                unsafe {
+                    asm!(
+                        "li t0, 1",  // AVL = 1
+                        ".byte {0}, {1}, {2}, {3}",
+                        const #b0, const #b1, const #b2, const #b3,
+                    )
+                }
+            });
+        }
+        match op {
+            syn::BinOp::Add(_) => {}
+            syn::BinOp::Sub(_) => {}
+            syn::BinOp::Mul(_) => {}
+            syn::BinOp::Rem(_) => {}
+            syn::BinOp::Shl(_) => {}
+            syn::BinOp::Shr(_) => {}
+            _ => {}
+        }
+        tokens
+    }
+}
+
 pub trait ToTokenStream {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context);
-    fn to_token_stream(&self, context: &mut Context) -> TokenStream {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext);
+    fn to_token_stream(&self, context: &mut CodegenContext) -> TokenStream {
         let mut tokens = TokenStream::new();
         self.to_tokens(&mut tokens, context);
         tokens
     }
-    fn into_token_stream(self, context: &mut Context) -> TokenStream
+    fn into_token_stream(self, context: &mut CodegenContext) -> TokenStream
     where
         Self: Sized,
     {
@@ -99,7 +154,7 @@ pub trait ToTokenStream {
 }
 
 impl ToTokenStream for ReturnType {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         match self {
             ReturnType::Default => {}
             ReturnType::Type(ty) => {
@@ -110,7 +165,7 @@ impl ToTokenStream for ReturnType {
     }
 }
 impl ToTokenStream for BareFnArg {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         if let Some(ident) = self.name.as_ref() {
             ident.to_tokens(tokens);
             token::Colon::default().to_tokens(tokens);
@@ -119,7 +174,7 @@ impl ToTokenStream for BareFnArg {
     }
 }
 impl ToTokenStream for Type {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         match self {
             Type::Array { elem, len } => {
                 token::Bracket::default().surround(tokens, |inner| {
@@ -171,7 +226,7 @@ impl ToTokenStream for Type {
     }
 }
 impl ToTokenStream for Pattern {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         match self {
             Pattern::Ident { mutability, ident } => {
                 if *mutability {
@@ -206,27 +261,73 @@ impl ToTokenStream for Pattern {
     }
 }
 impl ToTokenStream for Expression {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
-        match self {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {}
+}
+
+impl ToTokenStream for TypedExpression {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
+        match &self.expr {
             Expression::Array(arr) => {
                 arr.to_tokens(tokens);
             }
             Expression::Assign { left, right } => {
+                // === ASM ===
+                // asm!("xxx");
+                // asm!("xxx");
+                // asm!("xxx");
+                // asm!("xxx", in(reg) left.as_mut_ptr());
+                // === Simulator ===
+                {
+                    #xxx.overflowing_add(#yyy)
+                }
+
                 left.to_tokens(tokens, context);
                 token::Eq::default().to_tokens(tokens);
                 right.to_tokens(tokens, context);
             }
             Expression::AssignOp { left, op, right } => {
+                // asm!("xxx");
+                // asm!("xxx");
+                // asm!("xxx");
+                // asm!("xxx", in(reg) left.as_mut_ptr());
+
                 // FIXME: use rvv assembler
                 left.to_tokens(tokens, context);
                 op.to_tokens(tokens);
                 right.to_tokens(tokens, context);
             }
             Expression::Binary { left, op, right } => {
+                // {
+                //     let rvv_vector_out: U256;
+                //     asm!("xxx");
+                //     asm!("xxx");
+                //     asm!("xxx");
+                //     asm!("xxx");
+                //     rvv_vector_out
+                // }
+
                 // FIXME: use rvv assembler
-                left.to_tokens(tokens, context);
-                op.to_tokens(tokens);
-                right.to_tokens(tokens, context);
+                let left_type_name = left.type_name();
+                let right_type_name = right.type_name();
+                let left_type_name_str = left_type_name.as_ref().map(|s| s.as_str());
+                let right_type_name_str = right_type_name.as_ref().map(|s| s.as_str());
+                match (left_type_name_str, right_type_name_str) {
+                    (Some("U256"), Some("U256")) => {
+                        let v_config = VConfig::Vsetvli {
+                            rd: XReg::Zero,
+                            rs1: XReg::T0,
+                            vtypei: Vtypei::new(256, Vlmul::M1, true, true),
+                        };
+                        token::Brace::default().surround(tokens, |inner| {
+                            inner.extend(context.gen_asm_items(left, op, right, &v_config, true));
+                        });
+                    }
+                    _ => {
+                        left.to_tokens(tokens, context);
+                        op.to_tokens(tokens);
+                        right.to_tokens(tokens, context);
+                    }
+                }
             }
             Expression::Call { func, args } => {
                 func.to_tokens(tokens, context);
@@ -244,7 +345,7 @@ impl ToTokenStream for Expression {
                 method,
                 args,
             } => {
-                // FIXME: use rvv assembler
+                // FIXME: use rvv assembler (overflowing_add/overflowing_sub ...)
                 receiver.to_tokens(tokens, context);
                 token::Dot::default().to_tokens(tokens);
                 method.to_tokens(tokens);
@@ -361,19 +462,13 @@ impl ToTokenStream for Expression {
                 body.to_tokens(tokens, context);
             }
         }
-    }
-}
-
-impl ToTokenStream for TypedExpression {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
-        self.expr.to_tokens(tokens, context);
         if self.id == usize::max_value() {
             panic!("Current expression not assgined with an id: {:?}", self);
         }
     }
 }
 impl ToTokenStream for Statement {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         match self {
             Statement::Local { pat, init } => {
                 token::Let::default().to_tokens(tokens);
@@ -393,7 +488,7 @@ impl ToTokenStream for Statement {
     }
 }
 impl ToTokenStream for Block {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         token::Brace::default().surround(tokens, |inner| {
             for stmt in &self.stmts {
                 stmt.to_tokens(inner, context);
@@ -402,7 +497,7 @@ impl ToTokenStream for Block {
     }
 }
 impl ToTokenStream for FnArg {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         if self.mutability {
             token::Mut::default().to_tokens(tokens);
         }
@@ -412,11 +507,13 @@ impl ToTokenStream for FnArg {
     }
 }
 impl ToTokenStream for Signature {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         token::Fn::default().to_tokens(tokens);
         self.ident.to_tokens(tokens);
         token::Paren::default().surround(tokens, |inner| {
             for (idx, input) in self.inputs.iter().enumerate() {
+                // let mut #xxx = ethereum_types::U256::from_little_endian(&#var.to_le_bytes()[..]);
+                // let mut #yyy = ethereum_types::U256::from_little_endian(&#var.to_le_bytes()[..]);
                 input.to_tokens(inner, context);
                 if idx != self.inputs.len() - 1 {
                     token::Comma::default().to_tokens(inner);
@@ -427,7 +524,7 @@ impl ToTokenStream for Signature {
     }
 }
 impl ToTokenStream for ItemFn {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         self.vis.to_tokens(tokens);
         self.sig.to_tokens(tokens, context);
         self.block.to_tokens(tokens, context);
@@ -447,12 +544,20 @@ mod test {
         let mut checker_context = CheckerContext::default();
         out.check_types(&mut checker_context)?;
 
+        println!("[variables]: ");
+        for (ident, (mutability, ty)) in &checker_context.variables {
+            if *mutability {
+                println!("  [mut {:6}] => {:?}", ident, ty);
+            } else {
+                println!("  [{:10}] => {:?}", ident, ty);
+            }
+        }
         println!("<< type checked >>");
 
         let mut tokens = TokenStream::new();
-        let mut context = Context::default();
-        out.to_tokens(&mut tokens, &mut context);
-        // println!("out: {:#?}", out);
+        let mut codegen_context = CodegenContext::new(checker_context.variables);
+        out.to_tokens(&mut tokens, &mut codegen_context);
+        println!("out: {:#?}", out);
         Ok(TokenStream::from(quote!(#tokens)))
     }
 
@@ -501,6 +606,25 @@ mod test {
         let input = quote! {
             fn comp_u256(x: U256, y: U256) -> U256 {
                 let mut z: U256 = x + y * x;
+                z = z + z;
+                z
+            }
+        };
+        let expected_output = quote! {
+            fn comp_u256(x: U256, y: U256) -> U256 {
+                let mut z: U256 = {
+                        let _out: U256;
+                        unsafe {
+                            asm!(
+                                "li t0, 1" , ".byte {0}, {1}, {2}, {3}" ,
+                                const 87u8 , const 240u8 , const 130u8 , const 14u8
+                            )
+                        }
+                        unsafe {
+                            asm!("mul", b0, b1, b2, b3);
+                        }
+                        _out
+                };
                 z = z + z;
                 z
             }
