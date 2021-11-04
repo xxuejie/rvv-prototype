@@ -2,14 +2,17 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use rvv_assembler::{RvvBlock, RvvInst, ToStmts};
-use std::collections::HashMap;
 use syn::{
     fold::Fold, parse_macro_input, BinOp, Block, Expr, ExprAssign, ExprAssignOp, ExprBinary,
     ExprPath, FnArg, Ident, ItemFn, Local, Pat, PatIdent, PatType, Stmt, Type,
 };
 
 mod ast;
-use ast::Registers;
+mod ast_transform;
+mod code_gen;
+mod type_checker;
+
+use code_gen::Registers;
 
 // use hacspec::ast;
 // mod syn_to_hacspec;
@@ -227,7 +230,7 @@ impl RvvTransformer {
 }
 
 fn extract_ident_name(ident: &Ident) -> String {
-    format!("{}", ident).to_string()
+    format!("{}", ident)
 }
 
 impl Fold for RvvTransformer {
