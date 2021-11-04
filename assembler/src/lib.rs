@@ -201,13 +201,13 @@ impl ToStmts for RvvBlock {
                         }
                     }
                 }
-                RvvInst::Sll256(dvreg, svreg1, svreg2) => {
+                RvvInst::Sll256(_dvreg, _svreg1, _svreg2) => {
                     unimplemented!()
                 }
-                RvvInst::Srl256(dvreg, svreg1, svreg2) => {
+                RvvInst::Srl256(_dvreg, _svreg1, _svreg2) => {
                     unimplemented!()
                 }
-                RvvInst::Ge256(dxreg, dvreg, svreg1, svreg2) => {
+                RvvInst::Ge256(_dxreg, _dvreg, _svreg1, _svreg2) => {
                     // FIXME: store result as bool or u256 ???
                     // println!("[asm] ge256 {}, {}, {}, {}", dxreg, dvreg, svreg1, svreg2);
                     quote! {

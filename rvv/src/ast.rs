@@ -1,12 +1,10 @@
 use core::cmp::{Eq, Ord, Ordering, PartialEq};
 use core::hash::{Hash, Hasher};
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::fmt;
 
 use anyhow::{anyhow, bail, Error};
 use proc_macro2::{Span as SynSpan, TokenStream};
-use quote::{quote, ToTokens};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Span(pub SynSpan);
@@ -120,7 +118,7 @@ pub enum Type {
     // A fixed size array type: [T; n].
     Array {
         elem: Box<Type>,
-        len: Expression,
+        len: TypedExpression,
     },
 
     // pub struct TypeBareFn {
@@ -172,6 +170,47 @@ pub enum Type {
     // }
     // A tuple type: (A, B, C, String).
     Tuple(Vec<Type>),
+}
+
+impl Type {
+    pub fn into_ref(self, lifetime: Option<syn::Ident>, mutability: bool) -> Type {
+        Type::Reference {
+            lifetime,
+            mutability,
+            elem: Box::new(self),
+        }
+    }
+    pub fn into_deref(self) -> Option<(bool, Box<Type>)> {
+        match self {
+            Type::Reference {
+                mutability, elem, ..
+            } => Some((mutability, elem)),
+            _ => None,
+        }
+    }
+    pub fn is_ref(&self) -> bool {
+        match self {
+            Type::Reference { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn unit() -> Type {
+        Type::Tuple(Vec::new())
+    }
+
+    pub fn primitive(name: &'static str) -> Type {
+        let mut segments = syn::punctuated::Punctuated::new();
+        segments.push_value(syn::PathSegment {
+            ident: syn::Ident::new(name, SynSpan::call_site()),
+            arguments: syn::PathArguments::None,
+        });
+        let path = syn::Path {
+            leading_colon: None,
+            segments,
+        };
+        Type::Path(path)
+    }
 }
 
 // pub enum Pat {
@@ -228,10 +267,21 @@ pub enum Pattern {
     // }
     // A range pattern: 1..=2.
     Range {
-        lo: Box<Expression>,
+        lo: Box<TypedExpression>,
         limits: syn::RangeLimits,
-        hi: Box<Expression>,
+        hi: Box<TypedExpression>,
     },
+
+    // pub struct PatReference {
+    //     pub attrs: Vec<Attribute>,
+    //     pub and_token: And,
+    //     pub mutability: Option<Mut>,
+    //     pub pat: Box<Pat>,
+    // }
+    // Reference {
+    //     mutability: bool,
+    //     pat: Box<Pattern>,
+    // },
 
     // pub struct PatPath {
     //     pub attrs: Vec<Attribute>,
@@ -258,7 +308,7 @@ pub enum Pattern {
 pub struct TypedExpression {
     pub expr: Expression,
     pub id: usize,
-    pub ty: Option<Type>,
+    pub ty: Option<Box<Type>>,
 }
 
 impl From<Expression> for TypedExpression {
@@ -332,8 +382,8 @@ pub enum Expression {
     // }
     // An assignment expression: a = compute().
     Assign {
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<TypedExpression>,
+        right: Box<TypedExpression>,
     },
 
     // pub struct ExprAssignOp {
@@ -344,9 +394,9 @@ pub enum Expression {
     // }
     // A compound assignment expression: counter += 1.
     AssignOp {
-        left: Box<Expression>,
+        left: Box<TypedExpression>,
         op: syn::BinOp,
-        right: Box<Expression>,
+        right: Box<TypedExpression>,
     },
 
     // pub struct ExprBinary {
@@ -357,9 +407,9 @@ pub enum Expression {
     // }
     // A binary operation: a + b, a * b.
     Binary {
-        left: Box<Expression>,
+        left: Box<TypedExpression>,
         op: syn::BinOp,
-        right: Box<Expression>,
+        right: Box<TypedExpression>,
     },
 
     // pub struct ExprType {
@@ -382,8 +432,8 @@ pub enum Expression {
     // }
     // A function call expression: invoke(a, b).
     Call {
-        func: Box<Expression>,
-        args: Vec<Expression>,
+        func: Box<TypedExpression>,
+        args: Vec<TypedExpression>,
     },
 
     // pub struct ExprMethodCall {
@@ -397,9 +447,9 @@ pub enum Expression {
     // }
     // A method call expression: x.foo::<T>(a, b).
     MethodCall {
-        receiver: Box<Expression>,
+        receiver: Box<TypedExpression>,
         method: syn::Ident,
-        args: Vec<Expression>,
+        args: Vec<TypedExpression>,
     },
 
     // pub struct ExprMacro {
@@ -417,7 +467,7 @@ pub enum Expression {
     // A unary operation: !x, *x.
     Unary {
         op: syn::UnOp,
-        expr: Box<Expression>,
+        expr: Box<TypedExpression>,
     },
 
     // pub struct ExprField {
@@ -428,7 +478,7 @@ pub enum Expression {
     // }
     // Access of a named struct field (obj.k) or unnamed tuple struct field (obj.0).
     Field {
-        base: Box<Expression>,
+        base: Box<TypedExpression>,
         member: syn::Member,
     },
 
@@ -440,7 +490,7 @@ pub enum Expression {
     // }
     // A cast expression: foo as f64.
     Cast {
-        expr: Box<Expression>,
+        expr: Box<TypedExpression>,
         ty: Box<Type>,
     },
 
@@ -453,8 +503,8 @@ pub enum Expression {
     // }
     // An array literal constructed from one repeated element: [0u8; N].
     Repeat {
-        expr: Box<Expression>,
-        len: Box<Expression>,
+        expr: Box<TypedExpression>,
+        len: Box<TypedExpression>,
     },
 
     // pub struct ExprLit {
@@ -470,7 +520,7 @@ pub enum Expression {
     //     pub expr: Box<Expr>,
     // }
     // A parenthesized expression: (a + b).
-    Paren(Box<Expression>),
+    Paren(Box<TypedExpression>),
 
     // pub struct ExprReference {
     //     pub attrs: Vec<Attribute>,
@@ -482,7 +532,7 @@ pub enum Expression {
     // A referencing operation: &a or &mut a.
     Reference {
         mutability: bool,
-        expr: Box<Expression>,
+        expr: Box<TypedExpression>,
     },
 
     // pub struct ExprIndex {
@@ -493,8 +543,8 @@ pub enum Expression {
     // }
     // A square bracketed indexing expression: vector[2].
     Index {
-        expr: Box<Expression>,
-        index: Box<Expression>,
+        expr: Box<TypedExpression>,
+        index: Box<TypedExpression>,
     },
 
     // pub struct ExprPath {
@@ -529,7 +579,7 @@ pub enum Expression {
     //     pub expr: Option<Box<Expr>>,
     // }
     // A return.
-    Return(Option<Box<Expression>>),
+    Return(Option<Box<TypedExpression>>),
 
     // pub struct ExprBlock {
     //     pub attrs: Vec<Attribute>,
@@ -548,9 +598,9 @@ pub enum Expression {
     // }
     // An if expression with an optional else block: if expr { ... } else { ... }.
     If {
-        cond: Box<Expression>,
+        cond: Box<TypedExpression>,
         then_branch: Block,
-        else_branch: Option<Box<Expression>>,
+        else_branch: Option<Box<TypedExpression>>,
     },
 
     // pub struct ExprRange {
@@ -561,9 +611,9 @@ pub enum Expression {
     // }
     // A range expression: 1..2, 1.., ..2, 1..=2, ..=2.
     Range {
-        from: Option<Box<Expression>>,
+        from: Option<Box<TypedExpression>>,
         limits: syn::RangeLimits,
-        to: Option<Box<Expression>>,
+        to: Option<Box<TypedExpression>>,
     },
 
     // pub struct ExprLoop {
@@ -586,30 +636,16 @@ pub enum Expression {
     // for pat in expr { ... }
     ForLoop {
         pat: Pattern,
-        expr: Box<Expression>,
+        expr: Box<TypedExpression>,
         body: Block,
     },
 }
 
 impl Expression {
-    pub fn get_type(&self, variables: &HashMap<syn::Ident, (bool, Type)>) -> Option<Type> {
+    pub fn is_literal(&self) -> bool {
         match self {
-            Expression::Binary { left, right, .. } => {
-                let left_type = left.get_type(variables);
-                let right_type = right.get_type(variables);
-                if left_type == right_type {
-                    left_type
-                } else {
-                    None
-                }
-            }
-            Expression::Paren(expr) => expr.get_type(variables),
-            Expression::Reference { expr, .. } => expr.get_type(variables),
-            Expression::Path(path) => match path.get_ident() {
-                Some(ident) => variables.get(ident).map(|(_, ty)| ty.clone()),
-                None => None,
-            },
-            _ => None,
+            Expression::Lit(_) => true,
+            _ => false,
         }
     }
 }
@@ -630,12 +666,12 @@ pub enum Statement {
     //     pub semi_token: Semi,
     // }
     // A local (let) binding.
-    Local { pat: Pattern, init: Expression },
+    Local { pat: Pattern, init: TypedExpression },
 
     // Expr without trailing semicolon. (as return value)
-    Expr(Expression),
+    Expr(TypedExpression),
     // Expression with trailing semicolon.
-    Semi(Expression),
+    Semi(TypedExpression),
 }
 
 // pub struct Block {
@@ -646,6 +682,20 @@ pub enum Statement {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Block {
     pub stmts: Vec<Statement>,
+}
+
+impl Block {
+    pub fn get_type(&self) -> Option<Box<Type>> {
+        if let Some(stmt) = self.stmts.last() {
+            match stmt {
+                Statement::Expr(expr) => {
+                    return expr.ty.clone();
+                }
+                _ => {}
+            }
+        }
+        Some(Box::new(Type::unit()))
+    }
 }
 
 // pub struct PatType {

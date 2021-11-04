@@ -38,7 +38,7 @@ impl TryFrom<&syn::Type> for Type {
         match ty {
             syn::Type::Array(syn::TypeArray { elem, len, ..}) => {
                 let elem = Box::new(Type::try_from(&**elem)?);
-                let len = Expression::try_from(len)?;
+                let len: TypedExpression = Expression::try_from(len)?.into();
                 Ok(Type::Array { elem, len })
             },
             syn::Type::BareFn(syn::TypeBareFn { lifetimes, unsafety, abi, inputs, variadic, output, .. }) => {
@@ -155,8 +155,8 @@ impl TryFrom<&syn::Pat> for Pattern {
                 Ok(Pattern::Path((*path).clone()))
             },
             syn::Pat::Range(syn::PatRange { lo, limits, hi, .. }) => {
-                let lo = Box::new(Expression::try_from(&**lo)?);
-                let hi = Box::new(Expression::try_from(&**hi)?);
+                let lo = Box::new(Expression::try_from(&**lo)?.into());
+                let hi = Box::new(Expression::try_from(&**hi)?.into());
                 let limits = *limits;
                 Ok(Pattern::Range { lo, limits, hi })
             },
@@ -204,13 +204,13 @@ impl TryFrom<&syn::Expr> for Expression {
                 Ok(Expression::Array(expr_array.clone()))
             }
             syn::Expr::Assign(syn::ExprAssign { left, right, .. }) => {
-                let left = Box::new(Expression::try_from(&**left)?);
-                let right = Box::new(Expression::try_from(&**right)?);
+                let left = Box::new(Expression::try_from(&**left)?.into());
+                let right = Box::new(Expression::try_from(&**right)?.into());
                 Ok(Expression::Assign { left, right})
             },
             syn::Expr::AssignOp(syn::ExprAssignOp { left, op, right, ..}) => {
-                let left = Box::new(Expression::try_from(&**left)?);
-                let right = Box::new(Expression::try_from(&**right)?);
+                let left = Box::new(Expression::try_from(&**left)?.into());
+                let right = Box::new(Expression::try_from(&**right)?.into());
                 let op = *op;
                 Ok(Expression::AssignOp { left, op, right})
             },
@@ -221,8 +221,8 @@ impl TryFrom<&syn::Expr> for Expression {
                 Err(anyhow!("await expression is not supported in rvv_vector"))
             },
             syn::Expr::Binary(syn::ExprBinary { left, op, right, ..}) => {
-                let left = Box::new(Expression::try_from(&**left)?);
-                let right = Box::new(Expression::try_from(&**right)?);
+                let left = Box::new(Expression::try_from(&**left)?.into());
+                let right = Box::new(Expression::try_from(&**right)?.into());
                 let op = *op;
                 Ok(Expression::Binary { left, op, right})
             },
@@ -239,14 +239,15 @@ impl TryFrom<&syn::Expr> for Expression {
                 Ok(Expression::Break)
             },
             syn::Expr::Call(syn::ExprCall { func, args, .. }) => {
-                let func = Box::new(Expression::try_from(&**func)?);
+                let func = Box::new(Expression::try_from(&**func)?.into());
                 let args = args.iter()
                     .map(Expression::try_from)
+                    .map(|result| result.map(TypedExpression::from))
                     .collect::<Result<Vec<_>, Error>>()?;
                 Ok(Expression::Call { func, args })
             },
             syn::Expr::Cast(syn::ExprCast { expr, ty, .. }) => {
-                let expr = Box::new(Expression::try_from(&**expr)?);
+                let expr = Box::new(Expression::try_from(&**expr)?.into());
                 let ty = Box::new(Type::try_from(&**ty)?);
                 Ok(Expression::Cast { expr, ty })
             },
@@ -257,7 +258,7 @@ impl TryFrom<&syn::Expr> for Expression {
                 Ok(Expression::Continue)
             },
             syn::Expr::Field(syn::ExprField { base, member, .. }) => {
-                let base = Box::new(Expression::try_from(&**base)?);
+                let base = Box::new(Expression::try_from(&**base)?.into());
                 let member = (*member).clone();
                 Ok(Expression::Field { base, member })
             },
@@ -266,7 +267,7 @@ impl TryFrom<&syn::Expr> for Expression {
                     bail!("label in for loop is not supported in rvv_vector");
                 }
                 let pat = Pattern::try_from(pat)?;
-                let expr = Box::new(Expression::try_from(&**expr)?);
+                let expr = Box::new(Expression::try_from(&**expr)?.into());
                 let body = Block::try_from(body)?;
                 Ok(Expression::ForLoop { pat, expr, body })
             },
@@ -274,17 +275,17 @@ impl TryFrom<&syn::Expr> for Expression {
                 Err(anyhow!("expression contained within invisible delimiters is not supported in rvv_vector"))
             },
             syn::Expr::If(syn::ExprIf { cond, then_branch, else_branch, ..}) => {
-                let cond = Box::new(Expression::try_from(&**cond)?);
+                let cond = Box::new(Expression::try_from(&**cond)?.into());
                 let then_branch = Block::try_from(then_branch)?;
                 let else_branch = else_branch
                     .as_ref()
-                    .map::<Result<_, Error>, _>(|(_, expr)| Ok(Box::new(Expression::try_from(&**expr)?)))
+                    .map::<Result<_, Error>, _>(|(_, expr)| Ok(Box::new(Expression::try_from(&**expr)?.into())))
                     .transpose()?;
                 Ok(Expression::If { cond, then_branch, else_branch })
             },
             syn::Expr::Index(syn::ExprIndex { expr, index, .. }) => {
-                let expr = Box::new(Expression::try_from(&**expr)?);
-                let index = Box::new(Expression::try_from(&**index)?);
+                let expr = Box::new(Expression::try_from(&**expr)?.into());
+                let index = Box::new(Expression::try_from(&**index)?.into());
                 Ok(Expression::Index { expr, index })
             },
             syn::Expr::Let(_) => {
@@ -310,15 +311,16 @@ impl TryFrom<&syn::Expr> for Expression {
                 if turbofish.is_some() {
                     bail!("explicit type parameters passed to a method call is not supported in rvv_vector");
                 }
-                let receiver = Box::new(Expression::try_from(&**receiver)?);
+                let receiver = Box::new(Expression::try_from(&**receiver)?.into());
                 let method = (*method).clone();
                 let args = args.iter()
                     .map(Expression::try_from)
+                    .map(|result| result.map(TypedExpression::from))
                     .collect::<Result<Vec<_>, Error>>()?;
                 Ok(Expression::MethodCall { receiver, method, args })
             },
             syn::Expr::Paren(syn::ExprParen { expr, .. }) => {
-                let expr = Box::new(Expression::try_from(&**expr)?);
+                let expr = Box::new(Expression::try_from(&**expr)?.into());
                 Ok(Expression::Paren(expr))
             },
             syn::Expr::Path(syn::ExprPath{ qself, path, .. }) => {
@@ -328,25 +330,25 @@ impl TryFrom<&syn::Expr> for Expression {
                 Ok(Expression::Path((*path).clone()))
             },
             syn::Expr::Range(syn::ExprRange { from, limits, to, .. }) => {
-                let from = from.as_ref().map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?))).transpose()?;
+                let from = from.as_ref().map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?.into()))).transpose()?;
                 let limits = *limits;
-                let to = to.as_ref().map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?))).transpose()?;
+                let to = to.as_ref().map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?.into()))).transpose()?;
                 Ok(Expression::Range { from, limits, to })
             },
             syn::Expr::Reference(syn::ExprReference{ mutability, expr, .. }) => {
                 let mutability = mutability.is_some();
-                let expr = Box::new(Expression::try_from(&**expr)?);
+                let expr = Box::new(Expression::try_from(&**expr)?.into());
                 Ok(Expression::Reference { mutability, expr })
             },
             syn::Expr::Repeat(syn::ExprRepeat { expr, len, .. }) => {
-                let expr = Box::new(Expression::try_from(&**expr)?);
-                let len = Box::new(Expression::try_from(&**len)?);
+                let expr = Box::new(Expression::try_from(&**expr)?.into());
+                let len = Box::new(Expression::try_from(&**len)?.into());
                 Ok(Expression::Repeat { expr, len })
             },
             syn::Expr::Return(syn::ExprReturn { expr, .. }) => {
                 let expr_opt = expr
                     .as_ref()
-                    .map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?)))
+                    .map::<Result<_, Error>, _>(|expr| Ok(Box::new(Expression::try_from(&**expr)?.into())))
                     .transpose()?;
                 Ok(Expression::Return(expr_opt))
             },
@@ -367,7 +369,7 @@ impl TryFrom<&syn::Expr> for Expression {
             },
             syn::Expr::Unary(syn::ExprUnary { op, expr, .. }) => {
                 let op = *op;
-                let expr = Box::new(Expression::try_from(&**expr)?);
+                let expr = Box::new(Expression::try_from(&**expr)?.into());
                 Ok(Expression::Unary { op, expr })
             },
             syn::Expr::Unsafe(_) => {
@@ -414,14 +416,14 @@ impl TryFrom<&syn::Stmt> for Statement {
                 }
                 let init = init
                     .as_ref()
-                    .map(|(_, expr)| Expression::try_from(&**expr))
+                    .map(|(_, expr)| Expression::try_from(&**expr).map(Into::into))
                     .transpose()?
                     .unwrap();
                 Ok(Statement::Local { pat, init })
             }
             syn::Stmt::Item(_) => Err(anyhow!("item definition is not supported in rvv_vector")),
-            syn::Stmt::Expr(expr) => Ok(Statement::Expr(Expression::try_from(expr)?)),
-            syn::Stmt::Semi(expr, _) => Ok(Statement::Semi(Expression::try_from(expr)?)),
+            syn::Stmt::Expr(expr) => Ok(Statement::Expr(Expression::try_from(expr)?.into())),
+            syn::Stmt::Semi(expr, _) => Ok(Statement::Semi(Expression::try_from(expr)?.into())),
         }
     }
 }

@@ -364,6 +364,14 @@ impl ToTokenStream for Expression {
     }
 }
 
+impl ToTokenStream for TypedExpression {
+    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
+        self.expr.to_tokens(tokens, context);
+        if self.id == usize::max_value() {
+            panic!("Current expression not assgined with an id: {:?}", self);
+        }
+    }
+}
 impl ToTokenStream for Statement {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut Context) {
         match self {
@@ -428,22 +436,34 @@ impl ToTokenStream for ItemFn {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use std::convert::TryFrom;
 
-    fn rvv_test(item: TokenStream) -> TokenStream {
+    use super::*;
+    use crate::type_checker::{CheckerContext, TypeChecker};
+
+    fn rvv_test(item: TokenStream) -> Result<TokenStream, Error> {
         let input: syn::ItemFn = syn::parse2(item).unwrap();
-        let out = ItemFn::try_from(&input).unwrap();
+        let mut out = ItemFn::try_from(&input)?;
+        let mut checker_context = CheckerContext::default();
+        out.check_types(&mut checker_context)?;
+
+        println!("<< type checked >>");
+
         let mut tokens = TokenStream::new();
         let mut context = Context::default();
         out.to_tokens(&mut tokens, &mut context);
-        println!("out: {:#?}", out);
-        TokenStream::from(quote!(#tokens))
+        // println!("out: {:#?}", out);
+        Ok(TokenStream::from(quote!(#tokens)))
     }
 
     #[test]
     fn test_simple() {
         let input = quote! {
             fn simple(x: u32, mut y: u64, z: &mut u64) -> u128 {
+                let qqq: bool = false;
+                let jjj: () = {
+                    y += 3;
+                };
                 *z += 3;
                 if z > 5 {
                     y = y * 6;
@@ -451,7 +471,7 @@ mod test {
                     y = y * 3;
                 }
                 y = y >> 1;
-                for i in 0..6 {
+                for i in 0..6u32 {
                     if i == 3 {
                         continue;
                     }
@@ -470,7 +490,7 @@ mod test {
         };
         let input_string = input.to_string();
         println!("[input ]: {}", input_string);
-        let output = rvv_test(input);
+        let output = rvv_test(input).unwrap();
         let output_string = output.to_string();
         println!("[otuput]: {}", output_string);
         assert_eq!(input_string, output_string);
@@ -486,7 +506,7 @@ mod test {
             }
         };
         println!("[input ]: {}", input);
-        let output = rvv_test(input);
+        let output = rvv_test(input).unwrap();
         println!("[otuput]: {}", output);
     }
 }
