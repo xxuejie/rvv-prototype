@@ -2,6 +2,7 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use rvv_assembler::{RvvBlock, RvvInst, ToStmts};
+use std::convert::TryFrom;
 use syn::{
     fold::Fold, parse_macro_input, BinOp, Block, Expr, ExprAssign, ExprAssignOp, ExprBinary,
     ExprPath, FnArg, Ident, ItemFn, Local, Pat, PatIdent, PatType, Stmt, Type,
@@ -13,6 +14,8 @@ mod code_gen;
 mod type_checker;
 
 use code_gen::Registers;
+use code_gen::{CodegenContext, ToTokenStream};
+use type_checker::{CheckerContext, TypeChecker};
 
 // use hacspec::ast;
 // mod syn_to_hacspec;
@@ -372,4 +375,16 @@ pub fn rvv_vector(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut transformer = RvvTransformer::default();
     let output = transformer.fold_item_fn(input);
     TokenStream::from(quote!(#output))
+}
+
+#[proc_macro_attribute]
+pub fn rvv_vector2(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemFn);
+    let mut out = ast::ItemFn::try_from(&input).unwrap();
+    let mut checker_context = CheckerContext::default();
+    out.check_types(&mut checker_context).unwrap();
+    let mut tokens = proc_macro2::TokenStream::new();
+    let mut codegen_context = CodegenContext::new(checker_context.variables);
+    out.to_tokens(&mut tokens, &mut codegen_context);
+    TokenStream::from(quote!(#tokens))
 }

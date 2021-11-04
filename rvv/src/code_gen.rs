@@ -73,6 +73,7 @@ pub struct CodegenContext {
     // general registers
     x_registers: Registers,
 
+    var_regs: HashMap<String, u8>,
     // expr_id => register_number
     expr_values: HashMap<usize, u8>,
     // expr_id => ethereum_types::U256 variable name
@@ -93,48 +94,231 @@ pub struct CodegenContext {
 impl CodegenContext {
     pub fn new(variables: HashMap<syn::Ident, (bool, Box<Type>)>) -> CodegenContext {
         CodegenContext {
-            v_registers: Registers::default(),
-            x_registers: Registers::default(),
+            v_registers: Registers::new("vector", 32),
+            x_registers: Registers::new("general", 32),
+            var_regs: HashMap::default(),
             expr_values: HashMap::default(),
+            expr_names: HashMap::default(),
             variables,
             v_config: None,
         }
     }
 
     // Generate raw asm statements for top level expression
-    fn gen_asm_items(
-        &mut self,
-        left: &TypedExpression,
-        op: &syn::BinOp,
-        right: &TypedExpression,
-        v_config: &VConfig,
-        top_level: bool,
-    ) -> Vec<TokenStream> {
-        let mut tokens = Vec::new();
-        if self.v_config.as_ref() != Some(v_config) {
-            self.v_config = Some(v_config.clone());
-            // vsetvli x0, t0, e256, m1, ta, ma
-            let [b0, b1, b2, b3] = VInst::VConfig(v_config.clone()).encode_bytes();
-            tokens.push(quote! {
+    fn gen_tokens(&mut self, expr: &TypedExpression, top_level: bool) -> TokenStream {
+        let (left, op, right, is_assign) = match &expr.expr {
+            Expression::AssignOp { left, op, right } => (left, op, right, true),
+            Expression::Binary { left, op, right } => (left, op, right, false),
+            _ => panic!("invalid top level expression: {:?}", expr),
+        };
+        if !top_level && is_assign {
+            panic!("assign op in inner top level expression");
+        }
+
+        let mut tokens = TokenStream::new();
+
+        if top_level {
+            let left_type_name = left.type_name();
+            let right_type_name = right.type_name();
+            let left_type_name_str = left_type_name.as_ref().map(|s| s.as_str());
+            let right_type_name_str = right_type_name.as_ref().map(|s| s.as_str());
+            match (left_type_name_str, right_type_name_str) {
+                (Some("U256"), Some("U256")) => {
+                    let v_config = VConfig::Vsetvli {
+                        rd: XReg::Zero,
+                        rs1: XReg::T0,
+                        vtypei: Vtypei::new(256, Vlmul::M1, true, true),
+                    };
+                    if self.v_config.as_ref() != Some(&v_config) {
+                        self.v_config = Some(v_config.clone());
+                        // vsetvli x0, t0, e256, m1, ta, ma
+                        let [b0, b1, b2, b3] = VInst::VConfig(v_config.clone()).encode_bytes();
+                        let ts = quote! {
+                            unsafe {
+                                asm!(
+                                    "li t0, 1",  // AVL = 1
+                                    ".byte {0}, {1}, {2}, {3}",
+                                    const #b0, const #b1, const #b2, const #b3,
+                                )
+                            }
+                        };
+                        tokens.extend(Some(ts));
+                    }
+                }
+                _ => {
+                    left.to_tokens(&mut tokens, self);
+                    op.to_tokens(&mut tokens);
+                    right.to_tokens(&mut tokens, self);
+                    return tokens;
+                }
+            }
+        }
+
+        for typed_expr in vec![left, right] {
+            if let Some(var_ident) = typed_expr.expr.var_ident() {
+                let var_name = var_ident.to_string();
+                if let Some(vreg) = self.var_regs.get(&var_name) {
+                    self.expr_values.insert(typed_expr.id, *vreg);
+                } else {
+                    // Load256
+                    let vreg = self.v_registers.next_register().unwrap();
+                    let [b0, b1, b2, b3] = VInst::VleV {
+                        width: 256,
+                        vd: VReg::from_u8(vreg),
+                        rs1: XReg::T0,
+                        vm: false,
+                    }
+                    .encode_bytes();
+                    let ts = quote! {
+                        unsafe {
+                            asm!(
+                                "mv t0, {0}",
+                                ".byte {1}, {2}, {3}, {4}",
+                                in(reg) #var_ident.to_le_bytes().as_ptr(),
+                                const #b0, const #b1, const #b2, const #b3,
+                            )
+                        }
+                    };
+                    tokens.extend(Some(ts));
+                    self.var_regs.insert(var_name, vreg);
+                    self.expr_values.insert(typed_expr.id, vreg);
+                }
+            } else {
+                let ts = self.gen_tokens(typed_expr, false);
+                tokens.extend(Some(ts));
+            }
+        }
+
+        match op {
+            syn::BinOp::Add(_) => {
+                let dvreg = self.v_registers.next_register().unwrap();
+                let svreg1 = self.expr_values.get(&left.id).unwrap();
+                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let [b0, b1, b2, b3] = VInst::VaddVv(Ivv {
+                    vd: VReg::from_u8(dvreg),
+                    vs2: VReg::from_u8(*svreg2),
+                    vs1: VReg::from_u8(*svreg1),
+                    vm: false,
+                })
+                .encode_bytes();
+                let ts = quote! {
+                    unsafe {
+                        asm!(
+                            ".byte {0}, {1}, {2}, {3}",
+                            const #b0, const #b1, const #b2, const #b3,
+                        )
+                    }
+                };
+                tokens.extend(Some(ts));
+                self.expr_values.insert(expr.id, dvreg);
+            }
+            syn::BinOp::Sub(_) => {
+                let dvreg = self.v_registers.next_register().unwrap();
+                let svreg1 = self.expr_values.get(&left.id).unwrap();
+                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let [b0, b1, b2, b3] = VInst::VsubVv(Ivv {
+                    vd: VReg::from_u8(dvreg),
+                    vs2: VReg::from_u8(*svreg2),
+                    vs1: VReg::from_u8(*svreg1),
+                    vm: false,
+                })
+                .encode_bytes();
+                let ts = quote! {
+                    unsafe {
+                        asm!(
+                            ".byte {0}, {1}, {2}, {3}",
+                            const #b0, const #b1, const #b2, const #b3,
+                        )
+                    }
+                };
+                tokens.extend(Some(ts));
+                self.expr_values.insert(expr.id, dvreg);
+            }
+            syn::BinOp::Mul(_) => {
+                let dvreg = self.v_registers.next_register().unwrap();
+                let svreg1 = self.expr_values.get(&left.id).unwrap();
+                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let [b0, b1, b2, b3] = VInst::VmulVv(Ivv {
+                    vd: VReg::from_u8(dvreg),
+                    vs2: VReg::from_u8(*svreg2),
+                    vs1: VReg::from_u8(*svreg1),
+                    vm: false,
+                })
+                .encode_bytes();
+                let ts = quote! {
+                    unsafe {
+                        asm!(
+                            ".byte {0}, {1}, {2}, {3}",
+                            const #b0, const #b1, const #b2, const #b3,
+                        )
+                    }
+                };
+                tokens.extend(Some(ts));
+                self.expr_values.insert(expr.id, dvreg);
+            }
+            syn::BinOp::Rem(_) => {
+                let dvreg = self.v_registers.next_register().unwrap();
+                let svreg1 = self.expr_values.get(&left.id).unwrap();
+                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let [b0, b1, b2, b3] = VInst::VremuVv(Ivv {
+                    vd: VReg::from_u8(dvreg),
+                    vs2: VReg::from_u8(*svreg2),
+                    vs1: VReg::from_u8(*svreg1),
+                    vm: false,
+                })
+                .encode_bytes();
+                let ts = quote! {
+                    unsafe {
+                        asm!(
+                            ".byte {0}, {1}, {2}, {3}",
+                            const #b0, const #b1, const #b2, const #b3,
+                        )
+                    }
+                };
+                tokens.extend(Some(ts));
+                self.expr_values.insert(expr.id, dvreg);
+            }
+            syn::BinOp::Shl(_) => {
+                unimplemented!()
+            }
+            syn::BinOp::Shr(_) => {
+                unimplemented!()
+            }
+            _ => {
+                unimplemented!()
+            }
+        }
+
+        if top_level && !is_assign {
+            let vreg = self.expr_values.get(&expr.id).unwrap();
+            let [b0, b1, b2, b3] = VInst::VseV {
+                width: 256,
+                vs3: VReg::from_u8(*vreg),
+                rs1: XReg::T0,
+                vm: false,
+            }
+            .encode_bytes();
+            tokens.extend(Some(quote! {
+                let mut rvv_vector_out_buf = [0u8; 32];
                 unsafe {
                     asm!(
-                        "li t0, 1",  // AVL = 1
-                        ".byte {0}, {1}, {2}, {3}",
+                        "mv t0, {0}",
+                        // This should be vse256
+                        ".byte {1}, {2}, {3}, {4}",
+                        in(reg) rvv_vector_out_buf.as_mut_ptr(),
                         const #b0, const #b1, const #b2, const #b3,
                     )
-                }
+                };
+                U256::from_le_bytes(&rvv_vector_out_buf)
+            }));
+            let mut rv = TokenStream::new();
+            token::Brace::default().surround(&mut rv, |inner| {
+                inner.extend(Some(tokens));
             });
+            rv
+        } else {
+            tokens
         }
-        match op {
-            syn::BinOp::Add(_) => {}
-            syn::BinOp::Sub(_) => {}
-            syn::BinOp::Mul(_) => {}
-            syn::BinOp::Rem(_) => {}
-            syn::BinOp::Shl(_) => {}
-            syn::BinOp::Shr(_) => {}
-            _ => {}
-        }
-        tokens
     }
 }
 
@@ -270,6 +454,8 @@ impl ToTokenStream for TypedExpression {
             Expression::Array(arr) => {
                 arr.to_tokens(tokens);
             }
+            // FIXME: NOT supported yet.
+            // x = y + x;
             Expression::Assign { left, right } => {
                 // === ASM ===
                 // asm!("xxx");
@@ -277,14 +463,16 @@ impl ToTokenStream for TypedExpression {
                 // asm!("xxx");
                 // asm!("xxx", in(reg) left.as_mut_ptr());
                 // === Simulator ===
-                {
-                    #xxx.overflowing_add(#yyy)
-                }
+                // {
+                //     x = #y.overflowing_add(#z).0
+                // }
 
+                // FIXME: use rvv assembler
                 left.to_tokens(tokens, context);
                 token::Eq::default().to_tokens(tokens);
                 right.to_tokens(tokens, context);
             }
+            // x += y;
             Expression::AssignOp { left, op, right } => {
                 // asm!("xxx");
                 // asm!("xxx");
@@ -292,9 +480,7 @@ impl ToTokenStream for TypedExpression {
                 // asm!("xxx", in(reg) left.as_mut_ptr());
 
                 // FIXME: use rvv assembler
-                left.to_tokens(tokens, context);
-                op.to_tokens(tokens);
-                right.to_tokens(tokens, context);
+                tokens.extend(Some(context.gen_tokens(self, true)));
             }
             Expression::Binary { left, op, right } => {
                 // {
@@ -302,32 +488,12 @@ impl ToTokenStream for TypedExpression {
                 //     asm!("xxx");
                 //     asm!("xxx");
                 //     asm!("xxx");
-                //     asm!("xxx");
+                //     asm!("xxx", in(reg) rvv_vector_out.as_mut_ptr());
                 //     rvv_vector_out
                 // }
 
                 // FIXME: use rvv assembler
-                let left_type_name = left.type_name();
-                let right_type_name = right.type_name();
-                let left_type_name_str = left_type_name.as_ref().map(|s| s.as_str());
-                let right_type_name_str = right_type_name.as_ref().map(|s| s.as_str());
-                match (left_type_name_str, right_type_name_str) {
-                    (Some("U256"), Some("U256")) => {
-                        let v_config = VConfig::Vsetvli {
-                            rd: XReg::Zero,
-                            rs1: XReg::T0,
-                            vtypei: Vtypei::new(256, Vlmul::M1, true, true),
-                        };
-                        token::Brace::default().surround(tokens, |inner| {
-                            inner.extend(context.gen_asm_items(left, op, right, &v_config, true));
-                        });
-                    }
-                    _ => {
-                        left.to_tokens(tokens, context);
-                        op.to_tokens(tokens);
-                        right.to_tokens(tokens, context);
-                    }
-                }
+                tokens.extend(Some(context.gen_tokens(self, true)));
             }
             Expression::Call { func, args } => {
                 func.to_tokens(tokens, context);
@@ -606,25 +772,6 @@ mod test {
         let input = quote! {
             fn comp_u256(x: U256, y: U256) -> U256 {
                 let mut z: U256 = x + y * x;
-                z = z + z;
-                z
-            }
-        };
-        let expected_output = quote! {
-            fn comp_u256(x: U256, y: U256) -> U256 {
-                let mut z: U256 = {
-                        let _out: U256;
-                        unsafe {
-                            asm!(
-                                "li t0, 1" , ".byte {0}, {1}, {2}, {3}" ,
-                                const 87u8 , const 240u8 , const 130u8 , const 14u8
-                            )
-                        }
-                        unsafe {
-                            asm!("mul", b0, b1, b2, b3);
-                        }
-                        _out
-                };
                 z = z + z;
                 z
             }

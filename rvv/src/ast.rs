@@ -672,6 +672,9 @@ impl Expression {
             _ => None,
         }
     }
+    pub fn var_name(&self) -> Option<String> {
+        self.var_ident().map(|ident| ident.to_string())
+    }
 }
 
 // pub enum Stmt {
