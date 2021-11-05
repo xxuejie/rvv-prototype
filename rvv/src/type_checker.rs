@@ -11,6 +11,8 @@ use crate::ast::{
 #[derive(Default, Debug)]
 pub struct CheckerContext {
     expr_id: usize,
+    pub literal_exprs: HashMap<usize, syn::Lit>,
+    pub uninfered_exprs: HashMap<usize, TypedExpression>,
     // ident => (mutability, Type)
     pub variables: HashMap<syn::Ident, (bool, Box<Type>)>,
 }
@@ -327,11 +329,10 @@ impl TypeChecker for TypedExpression {
             _ => None,
         };
 
-        if !self.expr.is_literal() && self.ty.is_none() {
-            println!(
-                "[WARN]: non-literal expression's type not infered, id={}, {:?}",
-                self.id, self.expr
-            );
+        if let Some(lit) = self.expr.get_literal() {
+            context.literal_exprs.insert(self.id, lit.clone());
+        } else if self.ty.is_none() {
+            context.uninfered_exprs.insert(self.id, self.clone());
         }
         Ok(())
     }

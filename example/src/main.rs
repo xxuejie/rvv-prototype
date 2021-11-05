@@ -7,7 +7,7 @@
 
 extern crate rvv;
 use ckb_std::{debug, default_alloc};
-use rvv::{rvv_vector, rvv_vector2};
+use rvv::rvv_vector;
 ckb_std::entry!(program_entry);
 default_alloc!();
 // use numext_fixed_uint::{u256, U256};
@@ -39,7 +39,7 @@ impl U256 {
     }
 }
 
-#[rvv_vector2]
+#[rvv_vector]
 #[no_mangle]
 fn bn256_add(
     mut ax: U256,

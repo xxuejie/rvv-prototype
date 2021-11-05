@@ -659,10 +659,10 @@ pub enum Expression {
 }
 
 impl Expression {
-    pub fn is_literal(&self) -> bool {
+    pub fn get_literal(&self) -> Option<&syn::Lit> {
         match self {
-            Expression::Lit(_) => true,
-            _ => false,
+            Expression::Lit(lit) => Some(lit),
+            _ => None,
         }
     }
 
