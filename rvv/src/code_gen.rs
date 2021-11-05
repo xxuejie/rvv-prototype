@@ -89,10 +89,16 @@ pub struct CodegenContext {
     //     * dump all x register data to memory
     //     * update v_config and insert asm!()
     v_config: Option<VConfig>,
+
+    // Add original asm to generated code
+    show_asm: bool,
 }
 
 impl CodegenContext {
-    pub fn new(variables: HashMap<syn::Ident, (bool, Box<Type>)>) -> CodegenContext {
+    pub fn new(
+        variables: HashMap<syn::Ident, (bool, Box<Type>)>,
+        show_asm: bool,
+    ) -> CodegenContext {
         CodegenContext {
             v_registers: Registers::new("vector", 32),
             x_registers: Registers::new("general", 32),
@@ -101,6 +107,7 @@ impl CodegenContext {
             expr_names: HashMap::default(),
             variables,
             v_config: None,
+            show_asm,
         }
     }
 
@@ -174,6 +181,13 @@ impl CodegenContext {
             if self.v_config.as_ref() != Some(&v_config) {
                 self.v_config = Some(v_config.clone());
                 let [b0, b1, b2, b3] = VInst::VConfig(v_config.clone()).encode_bytes();
+                if self.show_asm {
+                    // TODO: use to_string()
+                    let comment = format!("{:?}", v_config);
+                    tokens.extend(Some(quote! {
+                        let _ = concat!(#comment);
+                    }));
+                }
                 let ts = quote! {
                     unsafe {
                         asm!(
@@ -195,13 +209,20 @@ impl CodegenContext {
                 } else {
                     // Load256
                     let vreg = self.v_registers.next_register().unwrap();
-                    let [b0, b1, b2, b3] = VInst::VleV {
+                    let inst = VInst::VleV {
                         width: 256,
                         vd: VReg::from_u8(vreg),
                         rs1: XReg::T0,
                         vm: false,
+                    };
+                    let [b0, b1, b2, b3] = inst.encode_bytes();
+                    if self.show_asm {
+                        // TODO: use to_string()
+                        let comment = format!("{:?}", inst);
+                        tokens.extend(Some(quote! {
+                            let _ = concat!(#comment);
+                        }));
                     }
-                    .encode_bytes();
                     let ts = quote! {
                         unsafe {
                             asm!(
@@ -264,13 +285,20 @@ impl CodegenContext {
                 let dvreg = self.v_registers.next_register().unwrap();
                 let svreg1 = self.expr_values.get(&left.id).unwrap();
                 let svreg2 = self.expr_values.get(&right.id).unwrap();
-                let [b0, b1, b2, b3] = VInst::VaddVv(Ivv {
+                let inst = VInst::VaddVv(Ivv {
                     vd: VReg::from_u8(dvreg),
                     vs2: VReg::from_u8(*svreg2),
                     vs1: VReg::from_u8(*svreg1),
                     vm: false,
-                })
-                .encode_bytes();
+                });
+                let [b0, b1, b2, b3] = inst.encode_bytes();
+                if self.show_asm {
+                    // TODO: use to_string()
+                    let comment = format!("{:?}", inst);
+                    tokens.extend(Some(quote! {
+                        let _ = concat!(#comment);
+                    }));
+                }
                 let ts = quote! {
                     unsafe {
                         asm!(
@@ -310,13 +338,20 @@ impl CodegenContext {
                 let dvreg = self.v_registers.next_register().unwrap();
                 let svreg1 = self.expr_values.get(&left.id).unwrap();
                 let svreg2 = self.expr_values.get(&right.id).unwrap();
-                let [b0, b1, b2, b3] = VInst::VmulVv(Ivv {
+                let inst = VInst::VmulVv(Ivv {
                     vd: VReg::from_u8(dvreg),
                     vs2: VReg::from_u8(*svreg2),
                     vs1: VReg::from_u8(*svreg1),
                     vm: false,
-                })
-                .encode_bytes();
+                });
+                let [b0, b1, b2, b3] = inst.encode_bytes();
+                if self.show_asm {
+                    // TODO: use to_string()
+                    let comment = format!("{:?}", inst);
+                    tokens.extend(Some(quote! {
+                        let _ = concat!(#comment);
+                    }));
+                }
                 let ts = quote! {
                     unsafe {
                         asm!(
@@ -337,13 +372,20 @@ impl CodegenContext {
                 let dvreg = self.v_registers.next_register().unwrap();
                 let svreg1 = self.expr_values.get(&left.id).unwrap();
                 let svreg2 = self.expr_values.get(&right.id).unwrap();
-                let [b0, b1, b2, b3] = VInst::VremuVv(Ivv {
+                let inst = VInst::VremuVv(Ivv {
                     vd: VReg::from_u8(dvreg),
                     vs2: VReg::from_u8(*svreg2),
                     vs1: VReg::from_u8(*svreg1),
                     vm: false,
-                })
-                .encode_bytes();
+                });
+                let [b0, b1, b2, b3] = inst.encode_bytes();
+                if self.show_asm {
+                    // TODO: use to_string()
+                    let comment = format!("{:?}", inst);
+                    tokens.extend(Some(quote! {
+                        let _ = concat!(#comment);
+                    }));
+                }
                 let ts = quote! {
                     unsafe {
                         asm!(
@@ -534,13 +576,20 @@ impl CodegenContext {
 
         if top_level && !is_assign {
             let vreg = self.expr_values.get(&expr.id).unwrap();
-            let [b0, b1, b2, b3] = VInst::VseV {
+            let inst = VInst::VseV {
                 width: 256,
                 vs3: VReg::from_u8(*vreg),
                 rs1: XReg::T0,
                 vm: false,
+            };
+            let [b0, b1, b2, b3] = inst.encode_bytes();
+            if self.show_asm {
+                // TODO: use to_string()
+                let comment = format!("{:?}", inst);
+                tokens.extend(Some(quote! {
+                    let _ = concat!(#comment);
+                }));
             }
-            .encode_bytes();
             tokens.extend(Some(quote! {
                 let mut tmp_rvv_vector_buf = [0u8; 32];
                 unsafe {
@@ -697,7 +746,7 @@ impl ToTokenStream for TypedExpression {
             Expression::Array(arr) => {
                 arr.to_tokens(tokens);
             }
-            // TODO: optmize by using left expression's register.
+            // TODO: Optimize by using left expression's register.
             // x = y + x;
             Expression::Assign { left, right } => {
                 // === ASM ===
@@ -966,8 +1015,9 @@ mod test {
         }
         println!("<< type checked >>");
 
+        let show_asm = true;
         let mut tokens = TokenStream::new();
-        let mut codegen_context = CodegenContext::new(checker_context.variables);
+        let mut codegen_context = CodegenContext::new(checker_context.variables, show_asm);
         out.to_tokens(&mut tokens, &mut codegen_context);
         // println!("out: {:#?}", out);
         Ok(TokenStream::from(quote!(#tokens)))

@@ -1,14 +1,14 @@
 // 7 bit
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Vtypei(u8);
 // 5 bit
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Uimm(u8);
 // 5 bit
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Imm(u8);
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Vlmul {
     // LMUL=1/8
@@ -90,7 +90,7 @@ x31     | t6       | temporary register 6                | no
 pc      | (none)   | program counter                     | n/a */
 
 // 5 bit
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum XReg {
     Zero = 0,
@@ -128,7 +128,7 @@ pub enum XReg {
 }
 
 // 5 bit
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum VReg {
     V0 = 0,
@@ -206,21 +206,21 @@ impl VReg {
 }
 
 /// Vector Integer Arithmetic Instructions data structures
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Ivv {
     pub vd: VReg,
     pub vs2: VReg,
     pub vs1: VReg,
     pub vm: bool,
 }
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Ivx {
     pub vd: VReg,
     pub vs2: VReg,
     pub rs1: XReg,
     pub vm: bool,
 }
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Ivi {
     pub vd: VReg,
     pub vs2: VReg,
@@ -279,7 +279,7 @@ impl Ivi {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum VConfig {
     /// vsetvli  rd, rs1, vtypei  # rd = new vl, rs1 = AVL, vtypei = new vtype setting
     Vsetvli { rd: XReg, rs1: XReg, vtypei: Vtypei },
@@ -294,7 +294,7 @@ pub enum VConfig {
 }
 
 // 32 bit
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum VInst {
     VConfig(VConfig),
 

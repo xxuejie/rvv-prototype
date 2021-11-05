@@ -39,7 +39,7 @@ impl U256 {
     }
 }
 
-#[rvv_vector]
+#[rvv_vector(show_asm)]
 #[no_mangle]
 fn bn256_add(
     mut ax: U256,

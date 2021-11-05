@@ -56,13 +56,18 @@ use type_checker::{CheckerContext, TypeChecker};
 //   PartialOrd   Trait for values that can be compared for a sort-order.
 
 #[proc_macro_attribute]
-pub fn rvv_vector(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn rvv_vector(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let show_asm = if !attr.is_empty() {
+        parse_macro_input!(attr as syn::Path).is_ident("show_asm")
+    } else {
+        false
+    };
     let input = parse_macro_input!(item as ItemFn);
     let mut out = ast::ItemFn::try_from(&input).unwrap();
     let mut checker_context = CheckerContext::default();
     out.check_types(&mut checker_context).unwrap();
     let mut tokens = proc_macro2::TokenStream::new();
-    let mut codegen_context = CodegenContext::new(checker_context.variables);
+    let mut codegen_context = CodegenContext::new(checker_context.variables, show_asm);
     out.to_tokens(&mut tokens, &mut codegen_context);
     TokenStream::from(quote!(#tokens))
 }
