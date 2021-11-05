@@ -104,7 +104,34 @@ impl CodegenContext {
         }
     }
 
+    #[cfg(feature = "simulator")]
+    fn gen_tokens(
+        &mut self,
+        expr: &TypedExpression,
+        top_level: bool,
+        extra_bind_id: Option<usize>,
+    ) -> TokenStream {
+        let (left, op, right, is_assign) = match &expr.expr {
+            Expression::AssignOp { left, op, right } => (left, op, right, true),
+            Expression::Binary { left, op, right } => (left, op, right, false),
+            Expression::Paren(sub_expr) => {
+                return self.gen_tokens(&*sub_expr, top_level, Some(expr.id));
+            }
+            _ => panic!("invalid top level expression: {:?}", expr),
+        };
+        if !top_level && is_assign {
+            panic!("assign op in inner top level expression");
+        }
+
+        let mut tokens = TokenStream::new();
+        left.to_tokens(&mut tokens, self);
+        op.to_tokens(&mut tokens);
+        right.to_tokens(&mut tokens, self);
+        tokens
+    }
+
     // Generate raw asm statements for top level expression
+    #[cfg(not(feature = "simulator"))]
     fn gen_tokens(
         &mut self,
         expr: &TypedExpression,
@@ -992,14 +1019,14 @@ mod test {
             fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
                 let x_bytes = x.to_le_bytes();
                 let j = x + (z * y);
-                z = x + y * x;
+                z = (x - y) * x;
                 let abc = 3456;
-                // z = (y + j * (y - x));
-                // z = z + z;
-                // z -= y;
-                // z *= y;
-                // z += y;
-                // z %= y;
+                z = (y + j * (y - x));
+                z = z + z;
+                z -= y;
+                z *= y;
+                z += y;
+                z %= y;
                 z
             }
         };
