@@ -39,7 +39,7 @@ impl U256 {
     }
 }
 
-#[rvv_vector]
+#[rvv_vector(show_asm)]
 #[no_mangle]
 fn bn256_add(
     mut ax: U256,
@@ -52,15 +52,18 @@ fn bn256_add(
     // mut cy: U256,
     // mut cz: U256,
 ) -> U256 {
-    // ax = ax + bx * cx; // case.1: complex ops, with temporary variable
-    // let x = d * c;     // case.2: simple op, with temporary variable
-    // let y = ax >= by;  // case.3: compare, with temporary variable
-    // a += c;            // case.4: simple op, then assgin to exists variable
-    let dx = bx - ax;
-    bx = bx >> cx;
-    ax = bx + cx; // case.5: simple mod op
-                  // -c                 // TODO case.6: return nagetive value
-    ax = ax % dx;
+    if ax > bx && bx == cx {
+        ax = ax * (cx + bx);
+    }
+    ax = (ax + bx) * cx; // case.1: complex ops, with temporary variable
+                         // let x = d * c;     // case.2: simple op, with temporary variable
+                         // let y = ax >= by;  // case.3: compare, with temporary variable
+                         // a += c;            // case.4: simple op, then assgin to exists variable
+                         // let dx = bx - ax;
+                         // bx = bx >> cx;
+                         // ax = bx + cx; // case.5: simple mod op
+                         //               // -c                 // TODO case.6: return nagetive value
+                         // ax = ax % dx;
     ax
     // return;            // TODO case.7: early return
     // if y {             // TODO case.8: if else

@@ -11,8 +11,10 @@ use crate::ast::{
 #[derive(Default, Debug)]
 pub struct CheckerContext {
     expr_id: usize,
+    pub literal_exprs: HashMap<usize, syn::Lit>,
+    pub uninfered_exprs: HashMap<usize, TypedExpression>,
     // ident => (mutability, Type)
-    variables: HashMap<syn::Ident, (bool, Box<Type>)>,
+    pub variables: HashMap<syn::Ident, (bool, Box<Type>)>,
 }
 
 impl CheckerContext {
@@ -210,28 +212,13 @@ impl TypeChecker for TypedExpression {
             );
         }
         self.id = context.get_expr_id();
-
         self.expr.check_types(context)?;
         self.ty = match &mut self.expr {
             Expression::Assign { left, right } | Expression::AssignOp { left, right, .. } => {
-                if left.ty.is_none() {
-                    left.ty = right.ty.clone()
-                } else if right.ty.is_none() {
-                    right.ty = left.ty.clone()
-                } else {
-                    if left.ty != right.ty {
-                        bail!(
-                            "Assign/AssignOp with different types is not supported in rvv_vector"
-                        );
-                    }
-                }
-                Some(Box::new(Type::unit()))
-            }
-            Expression::AssignOp { left, op, right } => {
                 match (&mut left.ty, &mut right.ty) {
                     (Some(left_ty), Some(right_ty)) => {
                         if left_ty != right_ty {
-                            bail!("assign op with different types is not supported in rvv_vector");
+                            bail!("Assign/AssignOp with different types is not supported in rvv_vector");
                         }
                     }
                     (None, Some(right_ty)) => {
@@ -285,15 +272,10 @@ impl TypeChecker for TypedExpression {
                         if !expr.ty.as_ref().map(|ty| ty.is_ref()).unwrap_or(true) {
                             bail!("deref a variable that is not reference is not supported in rvv_vector");
                         }
-                        if let Some(ty) = expr.ty.as_ref() {
-                            if let Some((_mutability, ty)) = ty.clone().into_deref() {
-                                Some(ty)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+                        expr.ty
+                            .as_ref()
+                            .and_then(|ty| ty.clone().into_deref())
+                            .map(|(_mutability, ty)| ty)
                     }
                     syn::UnOp::Not(_) | syn::UnOp::Neg(_) => None,
                 }
@@ -347,8 +329,10 @@ impl TypeChecker for TypedExpression {
             _ => None,
         };
 
-        if !self.expr.is_literal() && self.ty.is_none() {
-            // println!("[WARN]: non-literal expression type not infered, id={}, {:?}", self.id, self.expr);
+        if let Some(lit) = self.expr.get_literal() {
+            context.literal_exprs.insert(self.id, lit.clone());
+        } else if self.ty.is_none() {
+            context.uninfered_exprs.insert(self.id, self.clone());
         }
         Ok(())
     }
@@ -357,7 +341,6 @@ impl TypeChecker for Statement {
     fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
         match self {
             Statement::Local { pat, init } => {
-                // println!(">> stmt::local: {:?}", pat);
                 pat.check_types(context)?;
                 init.check_types(context)?;
                 match pat {
@@ -374,8 +357,8 @@ impl TypeChecker for Statement {
                                 .insert((*ident).clone(), (*mutability, ty));
                         }
                     }
-                    Pattern::Type { pat, ty } => match &**pat {
-                        Pattern::Ident { mutability, ident } => {
+                    Pattern::Type { pat, ty } => {
+                        if let Pattern::Ident { mutability, ident } = &**pat {
                             if init.ty.is_none() {
                                 init.ty = Some(ty.clone());
                             }
@@ -390,17 +373,14 @@ impl TypeChecker for Statement {
                                 );
                             }
                         }
-                        _ => {}
-                    },
+                    }
                     _ => {}
                 }
             }
             Statement::Expr(expr) => {
-                // println!(">> stmt::expr: {:?}", expr);
                 expr.check_types(context)?;
             }
             Statement::Semi(expr) => {
-                // println!(">> stmt::semi: {:?}", expr);
                 expr.check_types(context)?;
             }
         }

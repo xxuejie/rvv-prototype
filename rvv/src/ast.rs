@@ -195,6 +195,17 @@ impl Type {
         }
     }
 
+    pub fn type_ident(&self) -> Option<&syn::Ident> {
+        match self {
+            Type::Path(path) => path.get_ident(),
+            Type::Reference { elem, .. } => elem.type_ident(),
+            _ => None,
+        }
+    }
+    pub fn type_name(&self) -> Option<String> {
+        self.type_ident().map(|ident| ident.to_string())
+    }
+
     pub fn unit() -> Type {
         Type::Tuple(Vec::new())
     }
@@ -309,6 +320,12 @@ pub struct TypedExpression {
     pub expr: Expression,
     pub id: usize,
     pub ty: Option<Box<Type>>,
+}
+
+impl TypedExpression {
+    pub fn type_name(&self) -> Option<String> {
+        self.ty.as_ref().and_then(|ty| ty.type_name())
+    }
 }
 
 impl From<Expression> for TypedExpression {
@@ -642,11 +659,21 @@ pub enum Expression {
 }
 
 impl Expression {
-    pub fn is_literal(&self) -> bool {
+    pub fn get_literal(&self) -> Option<&syn::Lit> {
         match self {
-            Expression::Lit(_) => true,
-            _ => false,
+            Expression::Lit(lit) => Some(lit),
+            _ => None,
         }
+    }
+
+    pub fn var_ident(&self) -> Option<&syn::Ident> {
+        match self {
+            Expression::Path(path) => path.get_ident(),
+            _ => None,
+        }
+    }
+    pub fn var_name(&self) -> Option<String> {
+        self.var_ident().map(|ident| ident.to_string())
     }
 }
 
@@ -687,11 +714,8 @@ pub struct Block {
 impl Block {
     pub fn get_type(&self) -> Option<Box<Type>> {
         if let Some(stmt) = self.stmts.last() {
-            match stmt {
-                Statement::Expr(expr) => {
-                    return expr.ty.clone();
-                }
-                _ => {}
+            if let Statement::Expr(expr) = stmt {
+                return expr.ty.clone();
             }
         }
         Some(Box::new(Type::unit()))
