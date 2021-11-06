@@ -714,11 +714,8 @@ pub struct Block {
 impl Block {
     pub fn get_type(&self) -> Option<Box<Type>> {
         if let Some(stmt) = self.stmts.last() {
-            match stmt {
-                Statement::Expr(expr) => {
-                    return expr.ty.clone();
-                }
-                _ => {}
+            if let Statement::Expr(expr) = stmt {
+                return expr.ty.clone();
             }
         }
         Some(Box::new(Type::unit()))

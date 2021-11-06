@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Error};
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, ToTokens};
+use quote::{quote, ToTokens};
 use syn::token;
 
 use rvv_assembler::{Imm, Ivi, Ivv, Ivx, Uimm, VConfig, VInst, VReg, Vlmul, Vtypei, XReg};
@@ -21,8 +21,6 @@ pub struct Registers {
     pub category: &'static str,
     pub max_number: u8,
     pub last_number: u8,
-    // ident_name => (register_number, is_function_argument)
-    pub mapping: HashMap<String, (u8, bool)>,
 }
 
 impl Registers {
@@ -31,39 +29,24 @@ impl Registers {
             category,
             max_number,
             last_number: 0,
-            mapping: HashMap::default(),
         }
     }
 
     pub fn next_register(&mut self) -> Option<u8> {
         if self.last_number < self.max_number {
+            let value = self.last_number;
             self.last_number += 1;
-            let tmp_var_name = format!("__tmp_{}_var{}", self.category, self.last_number);
-            self.mapping.insert(tmp_var_name, (self.last_number, false));
-            return Some(self.last_number);
+            return Some(value);
         }
         None
     }
+}
 
-    pub fn search_reg(&self, reg: u8) -> Option<(String, bool)> {
-        for (name, (number, is_fn_arg)) in &self.mapping {
-            if *number == reg {
-                return Some((name.clone(), *is_fn_arg));
-            }
-        }
-        None
-    }
-
-    pub fn get_reg(&self, var_name: &str) -> Result<(u8, bool), String> {
-        self.mapping
-            .get(var_name)
-            .cloned()
-            .ok_or_else(|| format!("Unrecognized {} variable name: {}", self.category, var_name))
-    }
-
-    pub fn insert(&mut self, var_name: String, value: (u8, bool)) {
-        self.mapping.insert(var_name, value);
-    }
+#[cfg(feature = "simulator")]
+use quote::format_ident;
+#[cfg(feature = "simulator")]
+fn format_sim_ident(dvreg: u8) -> syn::Ident {
+    format_ident!("sim_reg_v{}", dvreg)
 }
 
 #[derive(Default)]
@@ -73,12 +56,15 @@ pub struct CodegenContext {
     // general registers
     x_registers: Registers,
 
+    tmp_var_id: usize,
+
+    // FIXME: handle varable scope
     // var_name => register_number
     #[cfg(not(feature = "simulator"))]
-    var_regs: HashMap<String, u8>,
+    var_regs: HashMap<syn::Ident, u8>,
     // expr_id => register_number
     #[cfg(not(feature = "simulator"))]
-    expr_values: HashMap<usize, u8>,
+    expr_regs: HashMap<usize, u8>,
 
     // var_name => ethereum_types::U256 variable name
     #[cfg(feature = "simulator")]
@@ -99,6 +85,7 @@ pub struct CodegenContext {
     //     * update v_config and insert asm!()
     v_config: Option<VConfig>,
 
+    is_special_block: bool,
     // Add original asm to generated code
     show_asm: bool,
 }
@@ -111,18 +98,26 @@ impl CodegenContext {
         CodegenContext {
             v_registers: Registers::new("vector", 32),
             x_registers: Registers::new("general", 32),
+            tmp_var_id: 0,
             #[cfg(not(feature = "simulator"))]
             var_regs: HashMap::default(),
             #[cfg(not(feature = "simulator"))]
-            expr_values: HashMap::default(),
+            expr_regs: HashMap::default(),
             #[cfg(feature = "simulator")]
             var_idents: HashMap::default(),
             #[cfg(feature = "simulator")]
             expr_idents: HashMap::default(),
             variables,
             v_config: None,
+            is_special_block: false,
             show_asm,
         }
+    }
+
+    fn next_tmp_var_id(&mut self) -> usize {
+        let value = self.tmp_var_id;
+        self.tmp_var_id += 1;
+        value
     }
 
     #[cfg(feature = "simulator")]
@@ -137,8 +132,8 @@ impl CodegenContext {
             Bool,
             AssginOp,
         }
-        fn format_sim_ident(vreg: u8) -> syn::Ident {
-            format_ident!("sim_reg_v{}", vreg)
+        fn format_tmp_ident(id: usize) -> syn::Ident {
+            format_ident!("tmp_var{}", id)
         }
 
         let (left, op, right, is_assign) = match &expr.expr {
@@ -158,9 +153,7 @@ impl CodegenContext {
         if top_level {
             let left_type_name = left.type_name();
             let right_type_name = right.type_name();
-            let left_type_name_str = left_type_name.as_ref().map(|s| s.as_str());
-            let right_type_name_str = right_type_name.as_ref().map(|s| s.as_str());
-            match (left_type_name_str, right_type_name_str) {
+            match (left_type_name.as_deref(), right_type_name.as_deref()) {
                 (Some("U256"), Some("U256")) => {}
                 _ => {
                     left.to_tokens(&mut tokens, self);
@@ -180,7 +173,7 @@ impl CodegenContext {
                     let vreg = self.v_registers.next_register().unwrap();
                     let var_numext = format_sim_ident(vreg);
                     let ts = quote! {
-                        let mut #var_numext = ethereum_types::U256::from_little_endian(&#var_ident.to_le_bytes()[..]);
+                        #var_numext = ethereum_types::U256::from_little_endian(&#var_ident.to_le_bytes()[..]);
                     };
                     tokens.extend(Some(ts));
                     self.var_idents
@@ -232,7 +225,7 @@ impl CodegenContext {
                 let var1 = self.expr_idents.get(&left.id).unwrap();
                 let var2 = self.expr_idents.get(&right.id).unwrap();
                 let ts = quote! {
-                    let (mut #var_dst, _) = #var1.overflowing_add(#var2);
+                    #var_dst = #var1.overflowing_add(#var2).0;
                 };
                 tokens.extend(Some(ts));
                 self.expr_idents.insert(expr.id, var_dst);
@@ -244,7 +237,7 @@ impl CodegenContext {
                 let var1 = self.expr_idents.get(&left.id).unwrap();
                 let var2 = self.expr_idents.get(&right.id).unwrap();
                 let ts = quote! {
-                    let (mut #var_dst, _) = #var1.overflowing_sub(#var2);
+                    #var_dst = #var1.overflowing_sub(#var2).0;
                 };
                 tokens.extend(Some(ts));
                 self.expr_idents.insert(expr.id, var_dst);
@@ -256,14 +249,22 @@ impl CodegenContext {
                 let var1 = self.expr_idents.get(&left.id).unwrap();
                 let var2 = self.expr_idents.get(&right.id).unwrap();
                 let ts = quote! {
-                    let (mut #var_dst, _) = #var1.overflowing_mul(#var2);
+                    #var_dst = #var1.overflowing_mul(#var2).0;
                 };
                 tokens.extend(Some(ts));
                 self.expr_idents.insert(expr.id, var_dst);
             }
             // The `/` operator (division)
             syn::BinOp::Div(_) => {
-                unimplemented!()
+                let dvreg = self.v_registers.next_register().unwrap();
+                let var_dst = format_sim_ident(dvreg);
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    #var_dst = #var1.checked_div(#var2).unwrap();
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `%` operator (modulus)
             syn::BinOp::Rem(_) => {
@@ -272,63 +273,158 @@ impl CodegenContext {
                 let var1 = self.expr_idents.get(&left.id).unwrap();
                 let var2 = self.expr_idents.get(&right.id).unwrap();
                 let ts = quote! {
-                    let mut #var_dst = #var1 % #var2;
+                    #var_dst = #var1 % #var2;
                 };
                 tokens.extend(Some(ts));
                 self.expr_idents.insert(expr.id, var_dst);
             }
-
             // The `&&` operator (logical and)
             syn::BinOp::And(_) => {
-                unimplemented!()
+                let var_dst = format_tmp_ident(self.next_tmp_var_id());
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    let mut #var_dst: bool = #var1 && #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `||` operator (logical or)
             syn::BinOp::Or(_) => {
-                unimplemented!()
+                let var_dst = format_tmp_ident(self.next_tmp_var_id());
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    let mut #var_dst: bool = #var1 || #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `^` operator (bitwise xor)
             syn::BinOp::BitXor(_) => {
-                unimplemented!()
+                let dvreg = self.v_registers.next_register().unwrap();
+                let var_dst = format_sim_ident(dvreg);
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    #var_dst = #var1 ^ #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `&` operator (bitwise and)
             syn::BinOp::BitAnd(_) => {
-                unimplemented!()
+                let dvreg = self.v_registers.next_register().unwrap();
+                let var_dst = format_sim_ident(dvreg);
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    #var_dst = #var1 & #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `|` operator (bitwise or)
             syn::BinOp::BitOr(_) => {
-                unimplemented!()
+                let dvreg = self.v_registers.next_register().unwrap();
+                let var_dst = format_sim_ident(dvreg);
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    #var_dst = #var1 | #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `<<` operator (shift left)
             syn::BinOp::Shl(_) => {
-                unimplemented!()
+                let dvreg = self.v_registers.next_register().unwrap();
+                let var_dst = format_sim_ident(dvreg);
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    #var_dst = #var1.shl(&#var2);
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `>>` operator (shift right)
             syn::BinOp::Shr(_) => {
-                unimplemented!()
+                let dvreg = self.v_registers.next_register().unwrap();
+                let var_dst = format_sim_ident(dvreg);
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    #var_dst = #var1.shr(&#var2);
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `==` operator (equality)
             syn::BinOp::Eq(_) => {
-                unimplemented!()
+                let var_dst = format_tmp_ident(self.next_tmp_var_id());
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    let mut #var_dst: bool = #var1 == #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `<` operator (less than)
             syn::BinOp::Lt(_) => {
-                unimplemented!()
+                let var_dst = format_tmp_ident(self.next_tmp_var_id());
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    let mut #var_dst: bool = #var1.lt(&#var2);
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `<=` operator (less than or equal to)
             syn::BinOp::Le(_) => {
-                unimplemented!()
+                let var_dst = format_tmp_ident(self.next_tmp_var_id());
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    let mut #var_dst: bool = #var1.le(&#var2);
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `!=` operator (not equal to)
             syn::BinOp::Ne(_) => {
-                unimplemented!()
+                let var_dst = format_tmp_ident(self.next_tmp_var_id());
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    let mut #var_dst: bool = #var1 != #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `>=` operator (greater than or equal to)
             syn::BinOp::Ge(_) => {
-                unimplemented!()
+                let var_dst = format_tmp_ident(self.next_tmp_var_id());
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    let mut #var_dst: bool = #var1.ge(&#var2);
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `>` operator (greater than)
             syn::BinOp::Gt(_) => {
-                unimplemented!()
+                let var_dst = format_tmp_ident(self.next_tmp_var_id());
+                let var1 = self.expr_idents.get(&left.id).unwrap();
+                let var2 = self.expr_idents.get(&right.id).unwrap();
+                let ts = quote! {
+                    let mut #var_dst: bool = #var1.gt(&#var2);
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var_dst);
             }
             // The `+=` operator
             syn::BinOp::AddEq(_) => {
@@ -362,7 +458,13 @@ impl CodegenContext {
             }
             // The `/=` operator
             syn::BinOp::DivEq(_) => {
-                unimplemented!()
+                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
+                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
+                let ts = quote! {
+                    #var1 = #var1.checked_div(#var2).unwrap();
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var1);
             }
             // The `%=` operator
             syn::BinOp::RemEq(_) => {
@@ -376,23 +478,53 @@ impl CodegenContext {
             }
             // The `^=` operator
             syn::BinOp::BitXorEq(_) => {
-                unimplemented!()
+                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
+                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
+                let ts = quote! {
+                    #var1 ^= #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var1);
             }
             // The `&=` operator
             syn::BinOp::BitAndEq(_) => {
-                unimplemented!()
+                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
+                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
+                let ts = quote! {
+                    #var1 &= #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var1);
             }
             // The `|=` operator
             syn::BinOp::BitOrEq(_) => {
-                unimplemented!()
+                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
+                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
+                let ts = quote! {
+                    #var1 |= #var2;
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var1);
             }
             // The `<<=` operator
             syn::BinOp::ShlEq(_) => {
-                unimplemented!()
+                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
+                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
+                let ts = quote! {
+                    #var1.shl_assign(&#var2);
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var1);
             }
             // The `>>=` operator
             syn::BinOp::ShrEq(_) => {
-                unimplemented!()
+                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
+                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
+                let ts = quote! {
+                    #var1.shr_assign(&#var2);
+                };
+                tokens.extend(Some(ts));
+                self.expr_idents.insert(expr.id, var1);
             }
         }
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
@@ -402,21 +534,33 @@ impl CodegenContext {
             }
         }
 
-        if top_level && !is_assign {
-            let var_numext = self.expr_idents.get(&expr.id).unwrap();
-            tokens.extend(Some(quote! {
-                let mut tmp_rvv_vector_buf = [0u8; 32];
-                #var_numext.to_little_endian(&mut tmp_rvv_vector_buf);
-                U256::from_le_bytes(&tmp_rvv_vector_buf)
-            }));
-            let mut rv = TokenStream::new();
-            token::Brace::default().surround(&mut rv, |inner| {
-                inner.extend(Some(tokens));
-            });
-            rv
-        } else {
-            tokens
+        if !top_level {
+            return tokens;
         }
+
+        let var_ident = self.expr_idents.get(&expr.id).unwrap();
+        let ts = match op_category {
+            OpCategory::Binary => {
+                tokens.extend(Some(quote! {
+                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    #var_ident.to_little_endian(&mut tmp_rvv_vector_buf);
+                    U256::from_le_bytes(&tmp_rvv_vector_buf)
+                }));
+            }
+            OpCategory::Bool => {
+                tokens.extend(Some(quote! {
+                    #var_ident
+                }));
+            }
+            OpCategory::AssginOp => {
+                return tokens;
+            }
+        };
+        let mut rv = TokenStream::new();
+        token::Brace::default().surround(&mut rv, |inner| {
+            inner.extend(Some(tokens));
+        });
+        rv
     }
 
     // Generate raw asm statements for top level expression
@@ -444,9 +588,7 @@ impl CodegenContext {
         if top_level {
             let left_type_name = left.type_name();
             let right_type_name = right.type_name();
-            let left_type_name_str = left_type_name.as_ref().map(|s| s.as_str());
-            let right_type_name_str = right_type_name.as_ref().map(|s| s.as_str());
-            let v_config = match (left_type_name_str, right_type_name_str) {
+            let v_config = match (left_type_name.as_deref(), right_type_name.as_deref()) {
                 // vsetvli x0, t0, e256, m1, ta, ma
                 (Some("U256"), Some("U256")) => VConfig::Vsetvli {
                     rd: XReg::Zero,
@@ -461,8 +603,8 @@ impl CodegenContext {
                 }
             };
             if self.v_config.as_ref() != Some(&v_config) {
-                self.v_config = Some(v_config.clone());
-                let [b0, b1, b2, b3] = VInst::VConfig(v_config.clone()).encode_bytes();
+                self.v_config = Some(v_config);
+                let [b0, b1, b2, b3] = VInst::VConfig(v_config).encode_bytes();
                 if self.show_asm {
                     // TODO: use to_string()
                     let comment = format!("{:?}", v_config);
@@ -485,9 +627,8 @@ impl CodegenContext {
 
         for typed_expr in [left, right] {
             if let Some(var_ident) = typed_expr.expr.var_ident() {
-                let var_name = var_ident.to_string();
-                if let Some(vreg) = self.var_regs.get(&var_name) {
-                    self.expr_values.insert(typed_expr.id, *vreg);
+                if let Some(vreg) = self.var_regs.get(var_ident) {
+                    self.expr_regs.insert(typed_expr.id, *vreg);
                 } else {
                     // Load256
                     let vreg = self.v_registers.next_register().unwrap();
@@ -516,8 +657,8 @@ impl CodegenContext {
                         }
                     };
                     tokens.extend(Some(ts));
-                    self.var_regs.insert(var_name, vreg);
-                    self.expr_values.insert(typed_expr.id, vreg);
+                    self.var_regs.insert(var_ident.clone(), vreg);
+                    self.expr_regs.insert(typed_expr.id, vreg);
                 }
             } else {
                 let ts = self.gen_tokens(typed_expr, false, None);
@@ -565,8 +706,8 @@ impl CodegenContext {
             // The `+` operator (addition)
             syn::BinOp::Add(_) => {
                 let dvreg = self.v_registers.next_register().unwrap();
-                let svreg1 = self.expr_values.get(&left.id).unwrap();
-                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let svreg1 = self.expr_regs.get(&left.id).unwrap();
+                let svreg2 = self.expr_regs.get(&right.id).unwrap();
                 let inst = VInst::VaddVv(Ivv {
                     vd: VReg::from_u8(dvreg),
                     vs2: VReg::from_u8(*svreg2),
@@ -590,13 +731,13 @@ impl CodegenContext {
                     }
                 };
                 tokens.extend(Some(ts));
-                self.expr_values.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, dvreg);
             }
             // The `-` operator (subtraction)
             syn::BinOp::Sub(_) => {
                 let dvreg = self.v_registers.next_register().unwrap();
-                let svreg1 = self.expr_values.get(&left.id).unwrap();
-                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let svreg1 = self.expr_regs.get(&left.id).unwrap();
+                let svreg2 = self.expr_regs.get(&right.id).unwrap();
                 let [b0, b1, b2, b3] = VInst::VsubVv(Ivv {
                     vd: VReg::from_u8(dvreg),
                     vs2: VReg::from_u8(*svreg2),
@@ -613,13 +754,13 @@ impl CodegenContext {
                     }
                 };
                 tokens.extend(Some(ts));
-                self.expr_values.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, dvreg);
             }
             // The `*` operator (multiplication)
             syn::BinOp::Mul(_) => {
                 let dvreg = self.v_registers.next_register().unwrap();
-                let svreg1 = self.expr_values.get(&left.id).unwrap();
-                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let svreg1 = self.expr_regs.get(&left.id).unwrap();
+                let svreg2 = self.expr_regs.get(&right.id).unwrap();
                 let inst = VInst::VmulVv(Ivv {
                     vd: VReg::from_u8(dvreg),
                     vs2: VReg::from_u8(*svreg2),
@@ -643,7 +784,7 @@ impl CodegenContext {
                     }
                 };
                 tokens.extend(Some(ts));
-                self.expr_values.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, dvreg);
             }
             // The `/` operator (division)
             syn::BinOp::Div(_) => {
@@ -652,8 +793,8 @@ impl CodegenContext {
             // The `%` operator (modulus)
             syn::BinOp::Rem(_) => {
                 let dvreg = self.v_registers.next_register().unwrap();
-                let svreg1 = self.expr_values.get(&left.id).unwrap();
-                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let svreg1 = self.expr_regs.get(&left.id).unwrap();
+                let svreg2 = self.expr_regs.get(&right.id).unwrap();
                 let inst = VInst::VremuVv(Ivv {
                     vd: VReg::from_u8(dvreg),
                     vs2: VReg::from_u8(*svreg2),
@@ -677,7 +818,7 @@ impl CodegenContext {
                     }
                 };
                 tokens.extend(Some(ts));
-                self.expr_values.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, dvreg);
             }
 
             // The `&&` operator (logical and)
@@ -734,8 +875,8 @@ impl CodegenContext {
             }
             // The `+=` operator
             syn::BinOp::AddEq(_) => {
-                let svreg1 = self.expr_values.get(&left.id).unwrap();
-                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let svreg1 = self.expr_regs.get(&left.id).unwrap();
+                let svreg2 = self.expr_regs.get(&right.id).unwrap();
                 let dvreg = *svreg1;
                 let [b0, b1, b2, b3] = VInst::VaddVv(Ivv {
                     vd: VReg::from_u8(dvreg),
@@ -753,12 +894,12 @@ impl CodegenContext {
                     }
                 };
                 tokens.extend(Some(ts));
-                self.expr_values.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, dvreg);
             }
             // The `-=` operator
             syn::BinOp::SubEq(_) => {
-                let svreg1 = self.expr_values.get(&left.id).unwrap();
-                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let svreg1 = self.expr_regs.get(&left.id).unwrap();
+                let svreg2 = self.expr_regs.get(&right.id).unwrap();
                 let dvreg = *svreg1;
                 let [b0, b1, b2, b3] = VInst::VsubVv(Ivv {
                     vd: VReg::from_u8(dvreg),
@@ -776,12 +917,12 @@ impl CodegenContext {
                     }
                 };
                 tokens.extend(Some(ts));
-                self.expr_values.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, dvreg);
             }
             // The `*=` operator
             syn::BinOp::MulEq(_) => {
-                let svreg1 = self.expr_values.get(&left.id).unwrap();
-                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let svreg1 = self.expr_regs.get(&left.id).unwrap();
+                let svreg2 = self.expr_regs.get(&right.id).unwrap();
                 let dvreg = *svreg1;
                 let [b0, b1, b2, b3] = VInst::VmulVv(Ivv {
                     vd: VReg::from_u8(dvreg),
@@ -799,7 +940,7 @@ impl CodegenContext {
                     }
                 };
                 tokens.extend(Some(ts));
-                self.expr_values.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, dvreg);
             }
             // The `/=` operator
             syn::BinOp::DivEq(_) => {
@@ -807,8 +948,8 @@ impl CodegenContext {
             }
             // The `%=` operator
             syn::BinOp::RemEq(_) => {
-                let svreg1 = self.expr_values.get(&left.id).unwrap();
-                let svreg2 = self.expr_values.get(&right.id).unwrap();
+                let svreg1 = self.expr_regs.get(&left.id).unwrap();
+                let svreg2 = self.expr_regs.get(&right.id).unwrap();
                 let dvreg = *svreg1;
                 let [b0, b1, b2, b3] = VInst::VremuVv(Ivv {
                     vd: VReg::from_u8(dvreg),
@@ -826,7 +967,7 @@ impl CodegenContext {
                     }
                 };
                 tokens.extend(Some(ts));
-                self.expr_values.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, dvreg);
             }
             // The `^=` operator
             syn::BinOp::BitXorEq(_) => {
@@ -851,13 +992,13 @@ impl CodegenContext {
         }
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some(dvreg) = self.expr_values.get(&expr.id).cloned() {
-                self.expr_values.insert(extra_expr_id, dvreg);
+            if let Some(dvreg) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, dvreg);
             }
         }
 
         if top_level && !is_assign {
-            let vreg = self.expr_values.get(&expr.id).unwrap();
+            let vreg = self.expr_regs.get(&expr.id).unwrap();
             let inst = VInst::VseV {
                 width: 256,
                 vs3: VReg::from_u8(*vreg),
@@ -1225,6 +1366,17 @@ impl ToTokenStream for Statement {
 impl ToTokenStream for Block {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         token::Brace::default().surround(tokens, |inner| {
+            #[cfg(feature = "simulator")]
+            if context.is_special_block {
+                context.is_special_block = false;
+                for i in 0..32 {
+                    let var_ident = format_sim_ident(i as u8);
+                    let ts = quote! {
+                        let mut #var_ident = ethereum_types::U256::zero();
+                    };
+                    inner.extend(Some(ts));
+                }
+            }
             for stmt in &self.stmts {
                 stmt.to_tokens(inner, context);
             }
@@ -1247,8 +1399,6 @@ impl ToTokenStream for Signature {
         self.ident.to_tokens(tokens);
         token::Paren::default().surround(tokens, |inner| {
             for (idx, input) in self.inputs.iter().enumerate() {
-                // let mut #xxx = ethereum_types::U256::from_little_endian(&#var.to_le_bytes()[..]);
-                // let mut #yyy = ethereum_types::U256::from_little_endian(&#var.to_le_bytes()[..]);
                 input.to_tokens(inner, context);
                 if idx != self.inputs.len() - 1 {
                     token::Comma::default().to_tokens(inner);
@@ -1262,6 +1412,7 @@ impl ToTokenStream for ItemFn {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         self.vis.to_tokens(tokens);
         self.sig.to_tokens(tokens, context);
+        context.is_special_block = true;
         self.block.to_tokens(tokens, context);
     }
 }
@@ -1349,16 +1500,19 @@ mod test {
     fn test_u256() {
         let input = quote! {
             fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
-                let x_bytes = x.to_le_bytes();
-                let j = x + (z * y);
-                z = (x - y) * x;
-                let abc = 3456;
-                z = (y + j * (y - x));
-                z = z + z;
-                z -= y;
-                z *= y;
-                z += y;
-                z %= y;
+                // let x_bytes = x.to_le_bytes();
+                // let j = x + (z * y);
+                if x > y && y == z {
+                    z = x * (z + y);
+                }
+                // z = (x - y) * x;
+                // let abc = 3456;
+                // z = (y + j * (y - x));
+                // z = z + z;
+                // z -= y;
+                // z *= y;
+                // z += y;
+                // z %= y;
                 z
             }
         };

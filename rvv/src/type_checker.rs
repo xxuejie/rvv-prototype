@@ -357,8 +357,8 @@ impl TypeChecker for Statement {
                                 .insert((*ident).clone(), (*mutability, ty));
                         }
                     }
-                    Pattern::Type { pat, ty } => match &**pat {
-                        Pattern::Ident { mutability, ident } => {
+                    Pattern::Type { pat, ty } => {
+                        if let Pattern::Ident { mutability, ident } = &**pat {
                             if init.ty.is_none() {
                                 init.ty = Some(ty.clone());
                             }
@@ -373,8 +373,7 @@ impl TypeChecker for Statement {
                                 );
                             }
                         }
-                        _ => {}
-                    },
+                    }
                     _ => {}
                 }
             }

@@ -52,6 +52,9 @@ fn bn256_add(
     // mut cy: U256,
     // mut cz: U256,
 ) -> U256 {
+    if ax > bx && bx == cx {
+        ax = ax * (cx + bx);
+    }
     ax = (ax + bx) * cx; // case.1: complex ops, with temporary variable
                          // let x = d * c;     // case.2: simple op, with temporary variable
                          // let y = ax >= by;  // case.3: compare, with temporary variable
