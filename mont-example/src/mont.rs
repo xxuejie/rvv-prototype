@@ -41,9 +41,9 @@ impl Mont {
     }
 
     pub fn precompute(&mut self) {
-        let r : u64 = self.r.clone().into();
-        let n : u64 = self.n.clone().into();
- 
+        let r: u64 = self.r.clone().into();
+        let n: u64 = self.n.clone().into();
+
         let r = r as i64;
         let n = n as i64;
         let (gcd, np, rp) = egcd(n, r);
@@ -67,9 +67,10 @@ impl Mont {
 #[no_mangle]
 pub fn reduce(np1: U256, n: U256, t: U256) -> U256 {
     let m = t * np1;
-    let m2: u32 = m.into();
-    let m3: U256 = m2.into();
-    (t + m3 * n) >> 32
+    let m2: u32 = u64::from(m) as u32;
+    let m3: U256 = U256::from(m2 as u64);
+    let lit_32: U256 = U256::from(32u64);
+    (t + m3 * n) >> lit_32
 }
 
 #[rvv_vector]
@@ -82,16 +83,12 @@ pub fn to_mont(r: U256, n: U256, x: U256) -> U256 {
 #[no_mangle]
 pub fn multi(np1: U256, n: U256, x: U256, y: U256) -> U256 {
     let xy = x * y;
-    let m = xy * np1;
-    let res = xy + m * n;
-    // not implemented yet
-    //  let res = reduce(xy);
-    // if res > mont.n {
-    //     res - mont.n
-    // } else {
-    //     res
-    // }
-    res >> 32
+    // let m = xy * np1;
+    // let res = xy + m * n;
+    let res = reduce(np1, n, xy);
+    let res = if res > n { res - n } else { res };
+    let lit_32: U256 = U256::from(32u64);
+    res >> lit_32
 }
 
 pub fn mont_main() {

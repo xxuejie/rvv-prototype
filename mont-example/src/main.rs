@@ -14,7 +14,7 @@ ckb_std::entry!(program_entry);
 default_alloc!();
 // use numext_fixed_uint::{u256, U256};
 
-#[derive(Clone, Debug, Default, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Ord, PartialOrd, PartialEq, Eq)]
 pub struct U256([u64; 4]);
 
 impl U256 {
