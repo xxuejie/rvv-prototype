@@ -71,8 +71,8 @@ pub fn reduce(np1: U256, n: U256, t: U256) -> U256 {
     let lit_bits = U256::from(32u32);
     let u = (t + m * n) >> lit_bits;
 
-    //let u = if u >= n { u - n } else { u };
-    U256::from(u32::from(u))
+    let u2 = if u >= n { u - n } else { u };
+    U256::from(u32::from(u2))
 }
 
 #[rvv_vector]
@@ -116,20 +116,12 @@ pub fn mont_main() {
     debug!("xy2 = {:?}", xy2);
 
     let mont_n: u64 = mont.n.clone().into();
-    let mut xy2: u64 = xy2.into();
-    if xy2 > mont_n {
-        xy2 = xy2 - mont_n;
-    }
-
+    let xy2: u64 = xy2.into();
     // into normal form
     let xy = reduce(mont.np1.clone(), mont.n.clone(), xy2.into());
     debug!("xy = {:?}", xy);
 
-    let mut xy: u64 = xy.into();
-    if xy > mont_n {
-        xy = xy - mont_n;
-    }
-
+    let xy: u64 = xy.into();
     // workaround
     // the result should be same
     assert_eq!(xy, (x * y) % mont_n);
