@@ -343,7 +343,7 @@ impl CodegenContext {
                 let var1 = self.expr_idents.get(&left.id).unwrap();
                 let var2 = self.expr_idents.get(&right.id).unwrap();
                 let ts = quote! {
-                    #var_dst = #var1.shl(&#var2);
+                    #var_dst = #var1 << #var2;
                 };
                 tokens.extend(Some(ts));
                 self.expr_idents.insert(expr.id, var_dst);
@@ -355,7 +355,7 @@ impl CodegenContext {
                 let var1 = self.expr_idents.get(&left.id).unwrap();
                 let var2 = self.expr_idents.get(&right.id).unwrap();
                 let ts = quote! {
-                    #var_dst = #var1.shr(&#var2);
+                    #var_dst = #var1 >> #var2;
                 };
                 tokens.extend(Some(ts));
                 self.expr_idents.insert(expr.id, var_dst);
@@ -511,7 +511,7 @@ impl CodegenContext {
                 let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
                 let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
                 let ts = quote! {
-                    #var1.shl_assign(&#var2);
+                    #var1 <<= #var2;
                 };
                 tokens.extend(Some(ts));
                 self.expr_idents.insert(expr.id, var1);
@@ -521,7 +521,7 @@ impl CodegenContext {
                 let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
                 let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
                 let ts = quote! {
-                    #var1.shr_assign(&#var2);
+                    #var1 >>= #var2;
                 };
                 tokens.extend(Some(ts));
                 self.expr_idents.insert(expr.id, var1);
