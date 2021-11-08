@@ -56,6 +56,18 @@ impl From<U256> for u64 {
     }
 }
 
+impl From<u32> for U256 {
+    fn from(u: u32) -> Self {
+        U256::from_u64(u as u64)
+    }
+}
+
+impl From<U256> for u32 {
+    fn from(u: U256) -> u32 {
+        u64::from(u) as u32
+    }
+}
+
 #[rvv_vector]
 #[no_mangle]
 fn bn256_add(

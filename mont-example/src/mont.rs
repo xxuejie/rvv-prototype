@@ -66,29 +66,28 @@ impl Mont {
 #[rvv_vector]
 #[no_mangle]
 pub fn reduce(np1: U256, n: U256, t: U256) -> U256 {
-    let m = t * np1;
-    let m2: u32 = u64::from(m) as u32;
-    let m3: U256 = U256::from(m2 as u64);
-    let lit_32: U256 = U256::from(32u64);
-    (t + m3 * n) >> lit_32
+    let t0 = U256::from(u32::from(t));
+    let m = U256::from(u32::from(t0 * np1));
+    let lit_bits = U256::from(32u32);
+    let u = (t + m * n) >> lit_bits;
+
+    //let u = if u >= n { u - n } else { u };
+    U256::from(u32::from(u))
 }
 
 #[rvv_vector]
 #[no_mangle]
 pub fn to_mont(r: U256, n: U256, x: U256) -> U256 {
-    (x * r) % n
+    let result = (x * r) % n;
+    U256::from(u32::from(result))
 }
 
 #[rvv_vector]
 #[no_mangle]
 pub fn multi(np1: U256, n: U256, x: U256, y: U256) -> U256 {
     let xy = x * y;
-    // let m = xy * np1;
-    // let res = xy + m * n;
     let res = reduce(np1, n, xy);
-    let res = if res > n { res - n } else { res };
-    let lit_32: U256 = U256::from(32u64);
-    res >> lit_32
+    res
 }
 
 pub fn mont_main() {
