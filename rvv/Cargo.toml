@@ -8,7 +8,6 @@ syn = { version = "1.0.80", features = ["extra-traits", "full", "fold", "printin
 quote = "1.0.9"
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 rvv-assembler = { path = "../assembler" }
-hacspec = { path = "../hacspec" }
 anyhow = "1.0.44"
 
 [lib]

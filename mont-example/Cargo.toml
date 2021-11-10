@@ -5,11 +5,10 @@ edition = "2018"
 
 [dependencies]
 rvv = { path = "../rvv" }
-ethereum-types = { version = "0.12.1", default-features = false, optional = true }
 ckb-std = "0.9.0"
 uint = { version = "0.9.1", default-features = false }
 
 [features]
 default = ["use_rvv_vector", "simulator"]
 use_rvv_vector = []
-simulator = ["rvv/simulator", "ethereum-types"]
+simulator = ["rvv/simulator"]
