@@ -60,18 +60,13 @@ pub struct CodegenContext {
 
     // FIXME: handle varable scope
     // var_name => register_number
-    #[cfg(not(feature = "simulator"))]
     var_regs: HashMap<syn::Ident, u8>,
     // expr_id => register_number
-    #[cfg(not(feature = "simulator"))]
     expr_regs: HashMap<usize, u8>,
 
-    // var_name => ethereum_types::U256 variable name
+    // expr_id => (var_name, bit_length)
     #[cfg(feature = "simulator")]
-    var_idents: HashMap<syn::Ident, syn::Ident>,
-    // expr_id => ethereum_types::U256 variable name
-    #[cfg(feature = "simulator")]
-    expr_idents: HashMap<usize, syn::Ident>,
+    expr_tokens: HashMap<usize, (TokenStream, u16)>,
 
     // FIXME: fill in current module
     // ident => (mutability, Type)
@@ -85,7 +80,6 @@ pub struct CodegenContext {
     //     * update v_config and insert asm!()
     v_config: Option<VConfig>,
 
-    is_special_block: bool,
     // Add original asm to generated code
     show_asm: bool,
 }
@@ -99,17 +93,12 @@ impl CodegenContext {
             v_registers: Registers::new("vector", 32),
             x_registers: Registers::new("general", 32),
             tmp_var_id: 0,
-            #[cfg(not(feature = "simulator"))]
             var_regs: HashMap::default(),
-            #[cfg(not(feature = "simulator"))]
             expr_regs: HashMap::default(),
             #[cfg(feature = "simulator")]
-            var_idents: HashMap::default(),
-            #[cfg(feature = "simulator")]
-            expr_idents: HashMap::default(),
+            expr_tokens: HashMap::default(),
             variables,
             v_config: None,
-            is_special_block: false,
             show_asm,
         }
     }
@@ -126,6 +115,7 @@ impl CodegenContext {
         expr: &TypedExpression,
         top_level: bool,
         extra_bind_id: Option<usize>,
+        mut bit_length: u16,
     ) -> TokenStream {
         enum OpCategory {
             Binary,
@@ -140,7 +130,8 @@ impl CodegenContext {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
             Expression::Paren(sub_expr) => {
-                return self.gen_tokens(&*sub_expr, top_level, Some(expr.id));
+                let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
+                return quote! {(#ts)};
             }
             _ => panic!("invalid top level expression: {:?}", expr),
         };
@@ -154,7 +145,12 @@ impl CodegenContext {
             let left_type_name = left.type_name();
             let right_type_name = right.type_name();
             match (left_type_name.as_deref(), right_type_name.as_deref()) {
-                (Some("U256"), Some("U256")) => {}
+                (Some("U256"), Some("U256")) => {
+                    bit_length = 256;
+                }
+                (Some("U512"), Some("U512")) => {
+                    bit_length = 512;
+                }
                 _ => {
                     left.to_tokens(&mut tokens, self);
                     op.to_tokens(&mut tokens);
@@ -166,23 +162,17 @@ impl CodegenContext {
 
         for typed_expr in [left, right] {
             if let Some(var_ident) = typed_expr.expr.var_ident() {
-                if let Some(ident) = self.var_idents.get(var_ident) {
-                    self.expr_idents.insert(typed_expr.id, ident.clone());
+                if let Some(vreg) = self.var_regs.get(var_ident) {
+                    self.expr_regs.insert(typed_expr.id, *vreg);
                 } else {
-                    // Load256
                     let vreg = self.v_registers.next_register().unwrap();
-                    let var_numext = format_sim_ident(vreg);
-                    let ts = quote! {
-                        #var_numext = ethereum_types::U256::from_little_endian(&#var_ident.to_le_bytes()[..]);
-                    };
-                    tokens.extend(Some(ts));
-                    self.var_idents
-                        .insert(var_ident.clone(), var_numext.clone());
-                    self.expr_idents.insert(typed_expr.id, var_numext.clone());
+                    self.var_regs.insert(var_ident.clone(), vreg);
+                    self.expr_regs.insert(typed_expr.id, vreg);
                 }
+                self.expr_tokens
+                    .insert(typed_expr.id, (quote! {#var_ident}, bit_length));
             } else {
-                let ts = self.gen_tokens(typed_expr, false, None);
-                tokens.extend(Some(ts));
+                let _ts = self.gen_tokens(typed_expr, false, None, bit_length);
             }
         }
 
@@ -217,350 +207,196 @@ impl CodegenContext {
             | syn::BinOp::ShrEq(_) => OpCategory::AssginOp,
         };
 
-        match op {
+        let (expr1, bit_len1) = self.expr_tokens.get(&left.id).cloned().unwrap();
+        let (expr2, bit_len2) = self.expr_tokens.get(&right.id).cloned().unwrap();
+        if bit_len1 != bit_len2 {
+            panic!("bit length not matched");
+        }
+        if let OpCategory::Binary = op_category {
+            let dvreg = self.v_registers.next_register().unwrap();
+            self.expr_regs.insert(expr.id, dvreg);
+        }
+        let ts = match op {
             // The `+` operator (addition)
             syn::BinOp::Add(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1.overflowing_add(#var2).0;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1.overflowing_add(#expr2).0
+                }
             }
             // The `-` operator (subtraction)
             syn::BinOp::Sub(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1.overflowing_sub(#var2).0;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1.overflowing_sub(#expr2).0
+                }
             }
             // The `*` operator (multiplication)
             syn::BinOp::Mul(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1.overflowing_mul(#var2).0;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1.overflowing_mul(#expr2).0
+                }
             }
             // The `/` operator (division)
             syn::BinOp::Div(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1.checked_div(#var2).unwrap();
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1.checked_div(#expr2).unwrap()
+                }
             }
             // The `%` operator (modulus)
             syn::BinOp::Rem(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1 % #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 % #expr2
+                }
             }
             // The `&&` operator (logical and)
             syn::BinOp::And(_) => {
-                let var_dst = format_tmp_ident(self.next_tmp_var_id());
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    let mut #var_dst: bool = #var1 && #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 && #expr2
+                }
             }
             // The `||` operator (logical or)
             syn::BinOp::Or(_) => {
-                let var_dst = format_tmp_ident(self.next_tmp_var_id());
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    let mut #var_dst: bool = #var1 || #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 || #expr2
+                }
             }
             // The `^` operator (bitwise xor)
             syn::BinOp::BitXor(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1 ^ #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 ^ #expr2
+                }
             }
             // The `&` operator (bitwise and)
             syn::BinOp::BitAnd(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1 & #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 & #expr2
+                }
             }
             // The `|` operator (bitwise or)
             syn::BinOp::BitOr(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1 | #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 | #expr2
+                }
             }
             // The `<<` operator (shift left)
             syn::BinOp::Shl(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1 << #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 << #expr2
+                }
             }
             // The `>>` operator (shift right)
             syn::BinOp::Shr(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let var_dst = format_sim_ident(dvreg);
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    #var_dst = #var1 >> #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 >> #expr2
+                }
             }
             // The `==` operator (equality)
             syn::BinOp::Eq(_) => {
-                let var_dst = format_tmp_ident(self.next_tmp_var_id());
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    let mut #var_dst: bool = #var1 == #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 == #expr2
+                }
             }
             // The `<` operator (less than)
             syn::BinOp::Lt(_) => {
-                let var_dst = format_tmp_ident(self.next_tmp_var_id());
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    let mut #var_dst: bool = #var1.lt(&#var2);
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 < #expr2
+                }
             }
             // The `<=` operator (less than or equal to)
             syn::BinOp::Le(_) => {
-                let var_dst = format_tmp_ident(self.next_tmp_var_id());
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    let mut #var_dst: bool = #var1.le(&#var2);
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 <= #expr2
+                }
             }
             // The `!=` operator (not equal to)
             syn::BinOp::Ne(_) => {
-                let var_dst = format_tmp_ident(self.next_tmp_var_id());
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    let mut #var_dst: bool = #var1 != #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 != #expr2
+                }
             }
             // The `>=` operator (greater than or equal to)
             syn::BinOp::Ge(_) => {
-                let var_dst = format_tmp_ident(self.next_tmp_var_id());
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    let mut #var_dst: bool = #var1.ge(&#var2);
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 >= #expr2
+                }
             }
             // The `>` operator (greater than)
             syn::BinOp::Gt(_) => {
-                let var_dst = format_tmp_ident(self.next_tmp_var_id());
-                let var1 = self.expr_idents.get(&left.id).unwrap();
-                let var2 = self.expr_idents.get(&right.id).unwrap();
-                let ts = quote! {
-                    let mut #var_dst: bool = #var1.gt(&#var2);
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var_dst);
+                quote! {
+                    #expr1 > #expr2
+                }
             }
             // The `+=` operator
             syn::BinOp::AddEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 = #var1.overflowing_add(#var2).0;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 = #expr1.overflowing_add(#expr2).0
+                }
             }
             // The `-=` operator
             syn::BinOp::SubEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 = #var1.overflowing_sub(#var2).0;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 = #expr1.overflowing_sub(#expr2).0
+                }
             }
             // The `*=` operator
             syn::BinOp::MulEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 = #var1.overflowing_mul(#var2).0;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 = #expr1.overflowing_mul(#expr2).0
+                }
             }
             // The `/=` operator
             syn::BinOp::DivEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 = #var1.checked_div(#var2).unwrap();
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 = #expr1.checked_div(#expr2).unwrap()
+                }
             }
             // The `%=` operator
             syn::BinOp::RemEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 %= #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 %= #expr2
+                }
             }
             // The `^=` operator
             syn::BinOp::BitXorEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 ^= #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 ^= #expr2
+                }
             }
             // The `&=` operator
             syn::BinOp::BitAndEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 &= #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 &= #expr2
+                }
             }
             // The `|=` operator
             syn::BinOp::BitOrEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 |= #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 |= #expr2
+                }
             }
             // The `<<=` operator
             syn::BinOp::ShlEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 <<= #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
+                quote! {
+                    #expr1 <<= #expr2
+                }
             }
             // The `>>=` operator
             syn::BinOp::ShrEq(_) => {
-                let var1 = self.expr_idents.get(&left.id).cloned().unwrap();
-                let var2 = self.expr_idents.get(&right.id).cloned().unwrap();
-                let ts = quote! {
-                    #var1 >>= #var2;
-                };
-                tokens.extend(Some(ts));
-                self.expr_idents.insert(expr.id, var1);
-            }
-        }
-        // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
-        if let Some(extra_expr_id) = extra_bind_id {
-            if let Some(ident) = self.expr_idents.get(&expr.id).cloned() {
-                self.expr_idents.insert(extra_expr_id, ident);
-            }
-        }
-
-        if !top_level {
-            return tokens;
-        }
-
-        let var_ident = self.expr_idents.get(&expr.id).unwrap();
-        let ts = match op_category {
-            OpCategory::Binary => {
-                tokens.extend(Some(quote! {
-                    let mut tmp_rvv_vector_buf = [0u8; 32];
-                    #var_ident.to_little_endian(&mut tmp_rvv_vector_buf);
-                    U256::from_le_bytes(&tmp_rvv_vector_buf)
-                }));
-            }
-            OpCategory::Bool => {
-                tokens.extend(Some(quote! {
-                    #var_ident
-                }));
-            }
-            OpCategory::AssginOp => {
-                return tokens;
+                quote! {
+                    #expr1 >>= #expr2
+                }
             }
         };
-        let mut rv = TokenStream::new();
-        token::Brace::default().surround(&mut rv, |inner| {
-            inner.extend(Some(tokens));
-        });
-        rv
+        tokens.extend(Some(ts));
+        self.expr_tokens.insert(expr.id, (tokens.clone(), bit_len1));
+        // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
+        if let Some(extra_expr_id) = extra_bind_id {
+            let ts_inner = tokens.clone();
+            let ts = quote! {
+                (#ts_inner)
+            };
+            self.expr_tokens.insert(extra_expr_id, (ts, bit_len1));
+        }
+        tokens
     }
 
     // Generate raw asm statements for top level expression
@@ -570,12 +406,13 @@ impl CodegenContext {
         expr: &TypedExpression,
         top_level: bool,
         extra_bind_id: Option<usize>,
+        mut bit_length: u16,
     ) -> TokenStream {
         let (left, op, right, is_assign) = match &expr.expr {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
             Expression::Paren(sub_expr) => {
-                return self.gen_tokens(&*sub_expr, top_level, Some(expr.id));
+                return self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
             }
             _ => panic!("invalid top level expression: {:?}", expr),
         };
@@ -661,7 +498,7 @@ impl CodegenContext {
                     self.expr_regs.insert(typed_expr.id, vreg);
                 }
             } else {
-                let ts = self.gen_tokens(typed_expr, false, None);
+                let ts = self.gen_tokens(typed_expr, false, None, bit_length);
                 tokens.extend(Some(ts));
             }
         }
@@ -1192,7 +1029,7 @@ impl ToTokenStream for TypedExpression {
                 // asm!("xxx");
                 // asm!("xxx");
                 // asm!("xxx", in(reg) left.as_mut_ptr());
-                tokens.extend(Some(context.gen_tokens(self, true, None)));
+                tokens.extend(Some(context.gen_tokens(self, true, None, 0)));
             }
             Expression::Binary { left, op, right } => {
                 // {
@@ -1203,7 +1040,7 @@ impl ToTokenStream for TypedExpression {
                 //     asm!("xxx", in(reg) rvv_vector_out.as_mut_ptr());
                 //     rvv_vector_out
                 // }
-                tokens.extend(Some(context.gen_tokens(self, true, None)));
+                tokens.extend(Some(context.gen_tokens(self, true, None, 0)));
             }
             Expression::Call { func, args } => {
                 func.to_tokens(tokens, context);
@@ -1366,17 +1203,6 @@ impl ToTokenStream for Statement {
 impl ToTokenStream for Block {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         token::Brace::default().surround(tokens, |inner| {
-            #[cfg(feature = "simulator")]
-            if context.is_special_block {
-                context.is_special_block = false;
-                for i in 0..32 {
-                    let var_ident = format_sim_ident(i as u8);
-                    let ts = quote! {
-                        let mut #var_ident = ethereum_types::U256::zero();
-                    };
-                    inner.extend(Some(ts));
-                }
-            }
             for stmt in &self.stmts {
                 stmt.to_tokens(inner, context);
             }
@@ -1412,7 +1238,6 @@ impl ToTokenStream for ItemFn {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         self.vis.to_tokens(tokens);
         self.sig.to_tokens(tokens, context);
-        context.is_special_block = true;
         self.block.to_tokens(tokens, context);
     }
 }
@@ -1500,24 +1325,47 @@ mod test {
     fn test_u256() {
         let input = quote! {
             fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
-                // let x_bytes = x.to_le_bytes();
-                // let j = x + (z * y);
+                let x_bytes = x.to_le_bytes();
+                let j = x + (z * y);
                 if x > y && y == z {
-                    z = x * (z + y);
+                    z = x & (z | y);
                 }
-                // z = (x - y) * x;
-                // let abc = 3456;
-                // z = (y + j * (y - x));
-                // z = z + z;
-                // z -= y;
-                // z *= y;
-                // z += y;
-                // z %= y;
+                z = (x - y) * x;
+                let abc = 3456;
+                z = (y + j * (y - x));
+                z = z + z;
+                z -= y;
+                z *= y;
+                z += y;
+                z %= y;
+                z >>= y;
+                z
+            }
+        };
+        let expected_output = quote! {
+            fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
+                let x_bytes = x.to_le_bytes();
+                let j = x.overflowing_add((z.overflowing_mul(y).0)).0;
+                if x > y && y == z {
+                    z = x & (z | y);
+                }
+                z = (x.overflowing_sub(y).0).overflowing_mul(x).0;
+                let abc = 3456;
+                z = (y
+                     .overflowing_add(j.overflowing_mul((y.overflowing_sub(x).0)).0)
+                     .0);
+                z = z.overflowing_add(z).0;
+                z = z.overflowing_sub(y).0;
+                z = z.overflowing_mul(y).0;
+                z = z.overflowing_add(y).0;
+                z %= y;
+                z >>= y;
                 z
             }
         };
         println!("[input ]: {}", input);
         let output = rvv_test(input).unwrap();
         println!("[otuput]: {}", output);
+        assert_eq!(output.to_string(), expected_output.to_string());
     }
 }
