@@ -1,2 +1,2 @@
 [workspace]
-members = ["example", "hacspec", "rvv", "assembler", "mont-example"]
+members = ["example", "rvv", "assembler", "mont-example"]
