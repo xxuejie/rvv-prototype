@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 #![no_std]
 #![no_main]
 #![feature(asm)]
@@ -5,126 +6,231 @@
 #![feature(alloc_error_handler)]
 #![feature(panic_info_message)]
 
-mod mont;
-
 extern crate rvv;
 use ckb_std::{debug, default_alloc};
 use rvv::rvv_vector;
+
 ckb_std::entry!(program_entry);
 default_alloc!();
-// use numext_fixed_uint::{u256, U256};
 
-#[derive(Clone, Copy, Debug, Default, Ord, PartialOrd, PartialEq, Eq)]
-pub struct U256([u64; 4]);
+mod rsa_test {
+    use rvv_mont_example::rsa::*;
+    use rvv_mont_example::uint_version::U256;
+    use rvv_mont_example::U;
+    pub fn test_rsa() {
+        let rsa = Rsa::new();
+        let plain_text = U!(2);
 
-impl U256 {
-    pub fn from_u64(value: u64) -> U256 {
-        U256([value, 0, 0, 0])
+        let cipher_text = rsa.encrypt(plain_text);
+        // println!("cipher_text = {}", cipher_text);
+        let plain_text2 = rsa.decrypt(cipher_text);
+
+        assert_eq!(plain_text, plain_text2);
+    }
+}
+
+mod uint_version_test {
+    use rvv_mont_example::uint_version::*;
+    use rvv_mont_example::U;
+
+    pub fn test() {
+        let a = U512::from(100);
+        let b: U256 = a.into();
+        let b2: U512 = b.into();
+        assert_eq!(a, b2);
     }
 
-    pub fn to_le_bytes(&self) -> [u8; 32] {
-        let mut buf = [0u8; 32];
-        for i in 0..4 {
-            buf[i * 8..(i + 1) * 8].copy_from_slice(&self.0[i].to_le_bytes()[..]);
+    pub fn test_i512() {
+        let a = I512::from(2);
+        let b = I512::from(10);
+        let sum = a + b;
+        assert_eq!(sum, I512::from(12));
+
+        let sub = a - b;
+        assert_eq!(sub, I512::new(false, U512::from(8)));
+
+        let mul = a * b;
+        assert_eq!(mul, I512::from(20));
+
+        let div = b / a;
+        assert_eq!(div, I512::from(5));
+
+        let rem = b % a;
+        assert_eq!(rem, I512::from(0));
+
+        assert!(b > a);
+        assert!(a < b);
+        assert!(a != b);
+
+        let x = I512::new(false, 11.into());
+        let y = I512::from(7);
+        let rem = x % y;
+        assert_eq!(rem, I512::from(3));
+    }
+
+    pub fn test_egcd() {
+        let a = I512::from(11);
+        let b = I512::from(17);
+        let (gcd, x, y) = egcd(a, b);
+        assert_eq!(gcd, I512::from(1));
+        assert_eq!(a * x + b * y, I512::from(1));
+    }
+
+    fn test_n(n: U256) {
+        let mut mont = Mont::new(n);
+        mont.precompute();
+
+        let x = U!(10);
+        let x2 = mont.to_mont(x);
+        let x3 = mont.reduce(x2.into());
+        assert_eq!(x, x3);
+
+        let x = U!(10);
+        let y = U!(20);
+        // into montgomery form
+        let x2 = mont.to_mont(x);
+        let y2 = mont.to_mont(y);
+        // do multiplication operation
+        let xy2 = mont.multi(x2, y2);
+        // into normal form
+        let xy = mont.reduce(xy2.into());
+        // the result should be same
+        assert_eq!(xy, (x * y) % mont.n);
+    }
+
+    fn test_xy(x: U256, y: U256) {
+        let mut mont = Mont::new(U!(1000001));
+        mont.precompute();
+
+        // into montgomery form
+        let x2 = mont.to_mont(x);
+        let y2 = mont.to_mont(y);
+        // do multiplication operation
+        let xy2 = mont.multi(x2, y2);
+        // into normal form
+        let xy = mont.reduce(xy2.into());
+        // the result should be same
+        assert_eq!(xy, (x * y) % mont.n);
+    }
+
+    pub fn test_n_loops() {
+        for n in 19..100 {
+            if n % 2 == 1 {
+                test_n(U!(n));
+            }
         }
-        buf
     }
 
-    pub fn from_le_bytes(bytes: &[u8; 32]) -> U256 {
-        let mut inner = [0u64; 4];
-        for i in 0..4 {
-            let mut buf = [0u8; 8];
-            buf.copy_from_slice(&bytes[i * 8..(i + 1) * 8]);
-            inner[i] = u64::from_le_bytes(buf);
+    pub fn test_xy_loops() {
+        for x in 10000..10100 {
+            test_xy(U!(x), U!(x + 20));
         }
-        U256(inner)
+    }
+
+    pub fn test_multiple() {
+        let mut mont = Mont::new(U!(17));
+        mont.precompute();
+
+        let x = U!(1);
+        let y = U!(2);
+        let z = U!(3);
+        let x2 = mont.to_mont(x);
+        let y2 = mont.to_mont(y);
+        let z2 = mont.to_mont(z);
+
+        let res = mont.multi(mont.multi(x2, y2), z2);
+
+        let res2 = mont.reduce(res.into());
+        assert_eq!(x * y * z % mont.n, res2);
+    }
+
+    pub fn test_pow() {
+        let mut mont = Mont::new(U!(17));
+        mont.precompute();
+        for base in 2..5 {
+            for n in 5..10 {
+                let base = U!(base);
+                let n = U!(n);
+                let x = mont.to_mont(base);
+
+                let v = mont.pow(x, n);
+                let v = mont.reduce(v.into());
+
+                let expected = base.pow(n) % mont.n;
+                assert_eq!(expected, v);
+            }
+        }
+    }
+
+    pub fn test_pow2() {
+        let mut mont = Mont::new(U!(33));
+        mont.precompute();
+        let base = U!(2);
+        let x = mont.to_mont(base);
+        let v = mont.pow(x, U!(7));
+        let v = mont.reduce(v.into());
+        assert_eq!(v, U!(29));
+    }
+
+    pub fn test_pow3() {
+        let mut mont = Mont::new(U!(33));
+        mont.precompute();
+        let x = U!(2);
+        let y = U!(2);
+        let x2 = mont.to_mont(x);
+        let y2 = mont.to_mont(y);
+        let z2 = mont.multi(x2, y2);
+        let z = mont.reduce(z2.into());
+        assert_eq!(z, U!(4));
+
+        let p2 = mont.pow(x2, U!(2));
+        let p = mont.reduce(p2.into());
+        assert_eq!(p, U!(4));
+    }
+
+    pub fn test_ops() {
+        let mut mont = Mont::new(U!(33));
+        mont.precompute();
+
+        let x = &MontForm::from_u256(U!(2), mont);
+        let y = &x.derive_from_u256(U!(3));
+
+        let sum = x + y;
+        let res: U256 = sum.into();
+        assert_eq!(U!(5), res);
+
+        let sub = y - x;
+        assert_eq!(U!(1), sub.into());
+
+        let sub2 = x - y;
+        assert_eq!(U!(32), sub2.into());
+
+        let mul = x * y;
+        assert_eq!(U!(6), mul.into());
+
+        let pow = x.pow(U!(3));
+        assert_eq!(U!(8), pow.into());
     }
 }
 
-impl From<u64> for U256 {
-    fn from(u: u64) -> Self {
-        U256::from_u64(u)
-    }
+#[test]
+pub fn test() {
+    main()
 }
 
-impl From<U256> for u64 {
-    fn from(u: U256) -> Self {
-        let bytes = u.to_le_bytes();
-        let mut le_bytes = [0u8; 8];
-        let _ = &le_bytes.copy_from_slice(&bytes[0..8]);
-        u64::from_le_bytes(le_bytes)
-    }
-}
+pub fn program_entry() -> i8 {
+    uint_version_test::test();
+    uint_version_test::test_i512();
+    uint_version_test::test_egcd();
+    uint_version_test::test_n_loops();
+    uint_version_test::test_xy_loops();
+    uint_version_test::test_multiple();
+    uint_version_test::test_pow();
+    uint_version_test::test_pow2();
+    uint_version_test::test_pow3();
+    uint_version_test::test_ops();
 
-impl From<u32> for U256 {
-    fn from(u: u32) -> Self {
-        U256::from_u64(u as u64)
-    }
-}
+    rsa_test::test_rsa();
 
-impl From<U256> for u32 {
-    fn from(u: U256) -> u32 {
-        u64::from(u) as u32
-    }
-}
-
-#[rvv_vector]
-#[no_mangle]
-fn bn256_add(
-    mut ax: U256,
-    // mut ay: U256,
-    // mut az: U256,
-    bx: U256,
-    // mut by: U256,
-    // mut bz: U256,
-    cx: U256,
-    // mut cy: U256,
-    // mut cz: U256,
-) -> U256 {
-    // ax = ax + bx * cx; // case.1: complex ops, with temporary variable
-    // let x = d * c;     // case.2: simple op, with temporary variable
-    // let y = ax >= by;  // case.3: compare, with temporary variable
-    // a += c;            // case.4: simple op, then assgin to exists variable
-    ax = bx + cx; // case.5: simple mod op
-                  // -c                 // TODO case.6: return nagetive value
-    ax
-    // return;            // TODO case.7: early return
-    // if y {             // TODO case.8: if else
-    //     c
-    // } else {
-    //     d
-    // }
-    // loop {             // TODO case.9: loop + if + break + continue
-    //     a += c;
-    //     if a > b {
-    //         break;
-    //     }
-    //     if a < b {
-    //         continue;
-    //     }
-    // }
-}
-
-fn program_entry() -> i8 {
-    let ax = U256([0x1122, 0x2233, 0x3344, 0x4455]);
-    // let ay = U256::from_u64(0x2);
-    // let az = U256::from_u64(0x3);
-    let bx = U256([0x1234, 0x2345, 0x4567, 0x5678]);
-    // let by = U256::from_u64(0x5);
-    // let bz = U256::from_u64(0x6);
-    let cx = U256([0xaa, 0xbb, 0xcc, 0xdd]);
-    // let cy = U256::from_u64(0x8);
-    // let cz = U256::from_u64(0x9);
-
-    let f = bn256_add(
-        ax, // ay, az,
-        bx, // by, bz,
-        cx, // cy, cz
-    );
-    debug!("f: {:?}", f);
-    assert_eq!(f, U256([4830, 9216, 17971, 22357]));
-    // assert_eq!(f, U256([750280, 2317561, 4780776, 8205460]));
-    debug!("start montgomery demo");
-    mont::mont_main();
-    0
+    return 0;
 }
