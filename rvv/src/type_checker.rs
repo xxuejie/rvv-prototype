@@ -6,6 +6,7 @@ use crate::ast::{
     BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Span, Statement,
     Type, TypedExpression, WithSpan,
 };
+use crate::SpannedError;
 
 #[derive(Default, Debug)]
 pub struct CheckerContext {
@@ -31,11 +32,11 @@ impl CheckerContext {
 //   1. variable shadowing is forbidden
 pub trait TypeChecker {
     // infer(by fill TypedExpression.{ty, id} field) and check types
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error>;
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError>;
 }
 
 impl TypeChecker for ReturnType {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         match self {
             ReturnType::Default => {}
             ReturnType::Type(_span, ty) => {
@@ -47,12 +48,12 @@ impl TypeChecker for ReturnType {
 }
 
 impl TypeChecker for BareFnArg {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         Ok(())
     }
 }
 impl TypeChecker for Type {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         match self {
             Type::Array { elem, len, .. } => {
                 elem.check_types(context)?;
@@ -86,7 +87,7 @@ impl TypeChecker for Type {
     }
 }
 impl TypeChecker for Pattern {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         match self {
             Pattern::Ident { mutability, ident } => {}
             Pattern::Type { pat, ty, .. } => {
@@ -104,7 +105,7 @@ impl TypeChecker for Pattern {
     }
 }
 impl TypeChecker for Expression {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         match self {
             Expression::Array(arr) => {}
             Expression::Assign { left, right, .. } => {
@@ -229,10 +230,10 @@ impl TypeChecker for Expression {
     }
 }
 impl TypeChecker for TypedExpression {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         if self.id != usize::max_value() {
             panic!(
-                "TypedExpression.id assigned more than once: id={}, expr={:?}",
+                "[Bug]: TypedExpression.id assigned more than once: id={}, expr={:?}",
                 self.id, self.expr
             );
         }
@@ -242,8 +243,8 @@ impl TypeChecker for TypedExpression {
             Expression::Assign { left, right, .. } | Expression::AssignOp { left, right, .. } => {
                 match (&mut left.ty, &mut right.ty) {
                     (Some(left_ty), Some(right_ty)) => {
-                        if left_ty != right_ty {
-                            return Err(anyhow!("Assign/AssignOp with different types is not supported in rvv_vector"));
+                        if left_ty.0 != right_ty.0 {
+                            return Err((self.expr.1, anyhow!("Assign/AssignOp with different types is not supported in rvv_vector")));
                         }
                     }
                     (None, Some(right_ty)) => {
@@ -269,8 +270,13 @@ impl TypeChecker for TypedExpression {
 
                 let inner_ty = match (&mut left.ty, &mut right.ty) {
                     (Some(left_ty), Some(right_ty)) => {
-                        if left_ty != right_ty {
-                            bail!("Binary op with different types is not supported in rvv_vector");
+                        if left_ty.0 != right_ty.0 {
+                            return Err((
+                                self.expr.1,
+                                anyhow!(
+                                    "Binary op with different types is not supported in rvv_vector"
+                                ),
+                            ));
                         }
                         left.ty.clone()
                     }
@@ -291,20 +297,18 @@ impl TypeChecker for TypedExpression {
                     inner_ty
                 }
             }
-            Expression::Unary { op, expr } => {
-                match op {
-                    syn::UnOp::Deref(_) => {
-                        if !expr.ty.as_ref().map(|ty| ty.0.is_ref()).unwrap_or(true) {
-                            bail!("deref a variable that is not reference is not supported in rvv_vector");
-                        }
-                        expr.ty
-                            .as_ref()
-                            .and_then(|ty| ty.0.clone().into_deref())
-                            .map(|(_mutability, ty)| ty)
+            Expression::Unary { op, expr } => match op {
+                syn::UnOp::Deref(_) => {
+                    if !expr.ty.as_ref().map(|ty| ty.0.is_ref()).unwrap_or(true) {
+                        return Err((expr.expr.1, anyhow!("deref a variable that is not reference is not supported in rvv_vector")));
                     }
-                    syn::UnOp::Not(_) | syn::UnOp::Neg(_) => None,
+                    expr.ty
+                        .as_ref()
+                        .and_then(|ty| ty.0.clone().into_deref())
+                        .map(|(_mutability, ty)| ty)
                 }
-            }
+                syn::UnOp::Not(_) | syn::UnOp::Neg(_) => None,
+            },
             Expression::Paren { expr, .. } => expr.ty.clone(),
             Expression::Reference {
                 and_token,
@@ -312,7 +316,10 @@ impl TypeChecker for TypedExpression {
                 expr,
             } => {
                 if expr.ty.as_ref().map(|ty| ty.0.is_ref()).unwrap_or(false) {
-                    bail!("multiple reference to a variable is not supported in rvv_vector");
+                    return Err((
+                        self.expr.1,
+                        anyhow!("multiple reference to a variable is not supported in rvv_vector"),
+                    ));
                 }
                 expr.ty.clone().map(|ty| {
                     Box::new((
@@ -332,9 +339,12 @@ impl TypeChecker for TypedExpression {
                     match (&then_type, &else_expr.ty) {
                         (Some(left_ty), Some(right_ty)) => {
                             if left_ty.0 != right_ty.0 {
-                                bail!(
+                                return Err((
+                                    self.expr.1,
+                                    anyhow!(
                                     "different if else branch types is not supported in rvv_vector"
-                                );
+                                ),
+                                ));
                             }
                             Some(left_ty.clone())
                         }
@@ -371,7 +381,7 @@ impl TypeChecker for TypedExpression {
     }
 }
 impl TypeChecker for Statement {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         match self {
             Statement::Local {
                 let_token,
@@ -385,10 +395,13 @@ impl TypeChecker for Statement {
                 match &pat.0 {
                     Pattern::Ident { mutability, ident } => {
                         if context.variables.contains_key(ident) {
-                            bail!(
-                                "variable ({}) shadowing is not supported in rvv_vector",
-                                ident
-                            );
+                            return Err((
+                                ident.span().into(),
+                                anyhow!(
+                                    "variable ({}) shadowing is not supported in rvv_vector",
+                                    ident
+                                ),
+                            ));
                         }
                         if let Some(ty) = init.ty.clone() {
                             context
@@ -410,10 +423,13 @@ impl TypeChecker for Statement {
                                 .insert(ident.clone(), (mutability.clone(), ty.clone()))
                                 .is_some()
                             {
-                                bail!(
-                                    "variable ({}) shadowing is not supported in rvv_vector",
-                                    ident
-                                );
+                                return Err((
+                                    ident.span().into(),
+                                    anyhow!(
+                                        "variable ({}) shadowing is not supported in rvv_vector",
+                                        ident
+                                    ),
+                                ));
                             }
                         }
                     }
@@ -431,7 +447,7 @@ impl TypeChecker for Statement {
     }
 }
 impl TypeChecker for Block {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         for (stmt, _span) in self.stmts.iter_mut() {
             stmt.check_types(context)?;
         }
@@ -439,13 +455,13 @@ impl TypeChecker for Block {
     }
 }
 impl TypeChecker for FnArg {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         self.ty.0.check_types(context)?;
         Ok(())
     }
 }
 impl TypeChecker for Signature {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         for input in self.inputs.iter_mut() {
             // let binding in signature
             context
@@ -459,7 +475,7 @@ impl TypeChecker for Signature {
 }
 
 impl TypeChecker for ItemFn {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), Error> {
+    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         self.sig.check_types(context)?;
         self.block.check_types(context)?;
         Ok(())

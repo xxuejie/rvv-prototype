@@ -6,16 +6,15 @@ use crate::ast::{
     BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Span, Statement,
     Type, TypedExpression,
 };
+use crate::SpannedError;
 use syn::spanned::Spanned;
-
-pub type Error = (Span, anyhow::Error);
 
 // ============================
 // ==== impl TryFrom for T ====
 // ============================
 impl TryFrom<&syn::ReturnType> for ReturnType {
-    type Error = Error;
-    fn try_from(return_type: &syn::ReturnType) -> Result<ReturnType, Error> {
+    type Error = SpannedError;
+    fn try_from(return_type: &syn::ReturnType) -> Result<ReturnType, SpannedError> {
         match return_type {
             syn::ReturnType::Default => Ok(ReturnType::Default),
             syn::ReturnType::Type(rarrow_token, ty) => {
@@ -28,8 +27,8 @@ impl TryFrom<&syn::ReturnType> for ReturnType {
 }
 
 impl TryFrom<&syn::BareFnArg> for BareFnArg {
-    type Error = Error;
-    fn try_from(bare_fn_arg: &syn::BareFnArg) -> Result<BareFnArg, Error> {
+    type Error = SpannedError;
+    fn try_from(bare_fn_arg: &syn::BareFnArg) -> Result<BareFnArg, SpannedError> {
         let span = bare_fn_arg.span().into();
         let name = bare_fn_arg
             .name
@@ -44,8 +43,8 @@ impl TryFrom<&syn::BareFnArg> for BareFnArg {
 }
 
 impl TryFrom<&syn::Type> for Type {
-    type Error = Error;
-    fn try_from(ty: &syn::Type) -> Result<Type, Error> {
+    type Error = SpannedError;
+    fn try_from(ty: &syn::Type) -> Result<Type, SpannedError> {
         match ty {
             syn::Type::Array(syn::TypeArray { elem, len, bracket_token, semi_token, ..}) => {
                 let elem = Box::new(Type::try_from(&**elem)?);
@@ -69,7 +68,7 @@ impl TryFrom<&syn::Type> for Type {
                 }
                 let inputs = inputs.iter()
                     .map(BareFnArg::try_from)
-                    .collect::<Result<Vec<_>, Error>>()?;
+                    .collect::<Result<Vec<_>, SpannedError>>()?;
                 let output = (ReturnType::try_from(output)?, output.span().into());
                 let fn_token = fn_token.span.into();
                 let paren_token = paren_token.span.into();
@@ -125,7 +124,7 @@ impl TryFrom<&syn::Type> for Type {
                 let paren_token = paren_token.span.into();
                 let elems = elems.iter()
                     .map(|elem| Ok((Type::try_from(elem)?, elem.span().into())))
-                    .collect::<Result<Vec<_>, Error>>()?;
+                    .collect::<Result<Vec<_>, SpannedError>>()?;
                 Ok(Type::Tuple{
                     paren_token,
                     elems
@@ -143,8 +142,8 @@ impl TryFrom<&syn::Type> for Type {
 }
 
 impl TryFrom<&syn::Pat> for Pattern {
-    type Error = Error;
-    fn try_from(pat: &syn::Pat) -> Result<Pattern, Error> {
+    type Error = SpannedError;
+    fn try_from(pat: &syn::Pat) -> Result<Pattern, SpannedError> {
         match pat {
             syn::Pat::Box(_) => {
                 Err((pat.span().into(), anyhow!("box pattern is not supported in rvv_vector")))
@@ -219,8 +218,8 @@ impl TryFrom<&syn::Pat> for Pattern {
 }
 
 impl TryFrom<&syn::Expr> for TypedExpression {
-    type Error = Error;
-    fn try_from(expr: &syn::Expr) -> Result<TypedExpression, Error> {
+    type Error = SpannedError;
+    fn try_from(expr: &syn::Expr) -> Result<TypedExpression, SpannedError> {
         let expr = (Expression::try_from(expr)?, expr.span().into());
         Ok(TypedExpression {
             expr,
@@ -231,8 +230,8 @@ impl TryFrom<&syn::Expr> for TypedExpression {
 }
 
 impl TryFrom<&syn::Expr> for Expression {
-    type Error = Error;
-    fn try_from(expr: &syn::Expr) -> Result<Expression, Error> {
+    type Error = SpannedError;
+    fn try_from(expr: &syn::Expr) -> Result<Expression, SpannedError> {
         match expr {
             syn::Expr::Array(expr_array) => {
                 Ok(Expression::Array(expr_array.clone()))
@@ -277,7 +276,7 @@ impl TryFrom<&syn::Expr> for Expression {
                 let func = Box::new(TypedExpression::try_from(&**func)?);
                 let args = args.iter()
                     .map(|expr| Ok(TypedExpression::try_from(expr)?))
-                    .collect::<Result<Vec<TypedExpression>, Error>>()?;
+                    .collect::<Result<Vec<TypedExpression>, SpannedError>>()?;
                 let paren_token = paren_token.span.into();
                 Ok(Expression::Call { func, args, paren_token })
             },
@@ -319,7 +318,7 @@ impl TryFrom<&syn::Expr> for Expression {
                 let then_branch = Block::try_from(then_branch)?;
                 let else_branch = else_branch
                     .as_ref()
-                    .map::<Result<_, Error>, _>(|(else_span, expr)| Ok((else_span.span.into(), Box::new(TypedExpression::try_from(&**expr)?))))
+                    .map::<Result<_, SpannedError>, _>(|(else_span, expr)| Ok((else_span.span.into(), Box::new(TypedExpression::try_from(&**expr)?))))
                     .transpose()?;
                 Ok(Expression::If { if_token, cond, then_branch, else_branch })
             },
@@ -357,7 +356,7 @@ impl TryFrom<&syn::Expr> for Expression {
                 let method = (*method).clone();
                 let args = args.iter()
                     .map(TypedExpression::try_from)
-                    .collect::<Result<Vec<_>, Error>>()?;
+                    .collect::<Result<Vec<_>, SpannedError>>()?;
                 let dot_token = dot_token.span().into();
                 let paren_token = paren_token.span.into();
                 Ok(Expression::MethodCall { receiver, method, args, dot_token, paren_token })
@@ -374,9 +373,9 @@ impl TryFrom<&syn::Expr> for Expression {
                 Ok(Expression::Path((*path).clone()))
             },
             syn::Expr::Range(syn::ExprRange { from, limits, to, .. }) => {
-                let from = from.as_ref().map::<Result<_, Error>, _>(|expr| Ok(Box::new(TypedExpression::try_from(&**expr)?))).transpose()?;
+                let from = from.as_ref().map::<Result<_, SpannedError>, _>(|expr| Ok(Box::new(TypedExpression::try_from(&**expr)?))).transpose()?;
                 let limits = *limits;
-                let to = to.as_ref().map::<Result<_, Error>, _>(|expr| Ok(Box::new(TypedExpression::try_from(&**expr)?))).transpose()?;
+                let to = to.as_ref().map::<Result<_, SpannedError>, _>(|expr| Ok(Box::new(TypedExpression::try_from(&**expr)?))).transpose()?;
                 Ok(Expression::Range { from, limits, to })
             },
             syn::Expr::Reference(syn::ExprReference{ and_token, mutability, expr, .. }) => {
@@ -395,7 +394,7 @@ impl TryFrom<&syn::Expr> for Expression {
             syn::Expr::Return(syn::ExprReturn { expr, return_token, .. }) => {
                 let expr = expr
                     .as_ref()
-                    .map::<Result<_, Error>, _>(|expr| Ok(Box::new(TypedExpression::try_from(&**expr)?)))
+                    .map::<Result<_, SpannedError>, _>(|expr| Ok(Box::new(TypedExpression::try_from(&**expr)?)))
                     .transpose()?;
                 let return_token = return_token.span.into();
                 Ok(Expression::Return{expr, return_token })
@@ -440,8 +439,8 @@ impl TryFrom<&syn::Expr> for Expression {
 }
 
 impl TryFrom<&syn::Stmt> for Statement {
-    type Error = Error;
-    fn try_from(stmt: &syn::Stmt) -> Result<Statement, Error> {
+    type Error = SpannedError;
+    fn try_from(stmt: &syn::Stmt) -> Result<Statement, SpannedError> {
         match stmt {
             syn::Stmt::Local(syn::Local {
                 pat,
@@ -504,13 +503,13 @@ impl TryFrom<&syn::Stmt> for Statement {
 }
 
 impl TryFrom<&syn::Block> for Block {
-    type Error = Error;
-    fn try_from(block: &syn::Block) -> Result<Block, Error> {
+    type Error = SpannedError;
+    fn try_from(block: &syn::Block) -> Result<Block, SpannedError> {
         let stmts = block
             .stmts
             .iter()
             .map(|stmt| Ok((Statement::try_from(stmt)?, stmt.span().into())))
-            .collect::<Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, SpannedError>>()?;
         Ok(Block {
             span: block.span().into(),
             brace_token: block.brace_token.span.into(),
@@ -520,8 +519,8 @@ impl TryFrom<&syn::Block> for Block {
 }
 
 impl TryFrom<&syn::FnArg> for FnArg {
-    type Error = Error;
-    fn try_from(fn_arg: &syn::FnArg) -> Result<FnArg, Error> {
+    type Error = SpannedError;
+    fn try_from(fn_arg: &syn::FnArg) -> Result<FnArg, SpannedError> {
         match fn_arg {
             syn::FnArg::Receiver(_) => Err((
                 fn_arg.span().into(),
@@ -552,8 +551,8 @@ impl TryFrom<&syn::FnArg> for FnArg {
 }
 
 impl TryFrom<&syn::Signature> for Signature {
-    type Error = Error;
-    fn try_from(sig: &syn::Signature) -> Result<Signature, Error> {
+    type Error = SpannedError;
+    fn try_from(sig: &syn::Signature) -> Result<Signature, SpannedError> {
         if let Some(constness) = sig.constness.as_ref() {
             return Err((
                 constness.span().into(),
@@ -594,7 +593,7 @@ impl TryFrom<&syn::Signature> for Signature {
             .inputs
             .iter()
             .map(FnArg::try_from)
-            .collect::<Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, SpannedError>>()?;
         let output = (ReturnType::try_from(&sig.output)?, sig.output.span().into());
         Ok(Signature {
             span: sig.span().into(),
@@ -608,9 +607,9 @@ impl TryFrom<&syn::Signature> for Signature {
 }
 
 impl TryFrom<&syn::ItemFn> for ItemFn {
-    type Error = Error;
+    type Error = SpannedError;
 
-    fn try_from(item_fn: &syn::ItemFn) -> Result<ItemFn, Error> {
+    fn try_from(item_fn: &syn::ItemFn) -> Result<ItemFn, SpannedError> {
         Ok(ItemFn {
             span: item_fn.span().into(),
             vis: item_fn.vis.clone(),

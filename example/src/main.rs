@@ -12,31 +12,10 @@ ckb_std::entry!(program_entry);
 default_alloc!();
 // use numext_fixed_uint::{u256, U256};
 
-#[derive(Clone, Debug, Default, Ord, PartialOrd, PartialEq, Eq)]
-pub struct U256([u64; 4]);
+use uint::construct_uint;
 
-impl U256 {
-    pub fn from_u64(value: u64) -> U256 {
-        U256([value, 0, 0, 0])
-    }
-
-    pub fn to_le_bytes(&self) -> [u8; 32] {
-        let mut buf = [0u8; 32];
-        for i in 0..4 {
-            buf[i * 8..(i + 1) * 8].copy_from_slice(&self.0[i].to_le_bytes()[..]);
-        }
-        buf
-    }
-
-    pub fn from_le_bytes(bytes: &[u8; 32]) -> U256 {
-        let mut inner = [0u64; 4];
-        for i in 0..4 {
-            let mut buf = [0u8; 8];
-            buf.copy_from_slice(&bytes[i * 8..(i + 1) * 8]);
-            inner[i] = u64::from_le_bytes(buf);
-        }
-        U256(inner)
-    }
+construct_uint! {
+    pub struct U256(4);
 }
 
 #[rvv_vector(show_asm)]

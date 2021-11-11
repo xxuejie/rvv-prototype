@@ -56,10 +56,12 @@ use type_checker::{CheckerContext, TypeChecker};
 //   PartialEq    Trait for equality comparisons which are partial equivalence relations.
 //   PartialOrd   Trait for values that can be compared for a sort-order.
 
+pub(crate) type SpannedError = (ast::Span, anyhow::Error);
+
 fn rvv_vector_inner(
     attr_opt: Option<syn::Path>,
     input: ItemFn,
-) -> Result<TokenStream, (ast::Span, anyhow::Error)> {
+) -> Result<TokenStream, SpannedError> {
     let show_asm = if let Some(attr) = attr_opt {
         if attr.is_ident("show_asm") {
             true
@@ -76,10 +78,10 @@ fn rvv_vector_inner(
 
     let mut out = ast::ItemFn::try_from(&input)?;
     let mut checker_context = CheckerContext::default();
-    out.check_types(&mut checker_context).unwrap();
+    out.check_types(&mut checker_context)?;
     let mut tokens = proc_macro2::TokenStream::new();
     let mut codegen_context = CodegenContext::new(checker_context.variables, show_asm);
-    out.to_tokens(&mut tokens, &mut codegen_context);
+    out.to_tokens(&mut tokens, &mut codegen_context)?;
     Ok(TokenStream::from(quote!(#tokens)))
 }
 
