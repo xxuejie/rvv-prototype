@@ -502,11 +502,13 @@ fn width_bits(width: u16) -> (u8, bool) {
         16 => (0b101, false),
         32 => (0b110, false),
         64 => (0b111, false),
+
         // NOTE: must consist with decoder
+        // See: https://five-embeddev.com/riscv-v-spec/draft/v-spec.html#_vector_load_store_instruction_encoding
         128 => (0b000, true),
-        256 => (0b001, true),
-        512 => (0b010, true),
-        1024 => (0b011, true),
+        256 => (0b101, true),
+        512 => (0b110, true),
+        1024 => (0b111, true),
         _ => panic!("Invalid width: {}", width),
     }
 }

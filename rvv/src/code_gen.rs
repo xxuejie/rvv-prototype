@@ -8,8 +8,8 @@ use syn::token;
 use rvv_assembler::{Imm, Ivi, Ivv, Ivx, Uimm, VConfig, VInst, VReg, Vlmul, Vtypei, XReg};
 
 use crate::ast::{
-    BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Statement, Type,
-    TypedExpression,
+    BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Span, Statement,
+    Type, TypedExpression, WithSpan,
 };
 
 // =============================
@@ -70,7 +70,7 @@ pub struct CodegenContext {
 
     // FIXME: fill in current module
     // ident => (mutability, Type)
-    variables: HashMap<syn::Ident, (bool, Box<Type>)>,
+    variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
 
     // [When update v_config]
     //   1. When first vector instruction used update v_config and insert asm!()
@@ -86,7 +86,7 @@ pub struct CodegenContext {
 
 impl CodegenContext {
     pub fn new(
-        variables: HashMap<syn::Ident, (bool, Box<Type>)>,
+        variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
         show_asm: bool,
     ) -> CodegenContext {
         CodegenContext {
@@ -126,10 +126,10 @@ impl CodegenContext {
             format_ident!("tmp_var{}", id)
         }
 
-        let (left, op, right, is_assign) = match &expr.expr {
+        let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
-            Expression::Paren(sub_expr) => {
+            Expression::Paren { expr: sub_expr, .. } => {
                 let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
                 return quote! {(#ts)};
             }
@@ -161,7 +161,7 @@ impl CodegenContext {
         }
 
         for typed_expr in [left, right] {
-            if let Some(var_ident) = typed_expr.expr.var_ident() {
+            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
                     self.expr_regs.insert(typed_expr.id, *vreg);
                 } else {
@@ -408,10 +408,10 @@ impl CodegenContext {
         extra_bind_id: Option<usize>,
         mut bit_length: u16,
     ) -> TokenStream {
-        let (left, op, right, is_assign) = match &expr.expr {
+        let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
-            Expression::Paren(sub_expr) => {
+            Expression::Paren { expr: sub_expr, .. } => {
                 return self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
             }
             _ => panic!("invalid top level expression: {:?}", expr),
@@ -463,7 +463,7 @@ impl CodegenContext {
         }
 
         for typed_expr in [left, right] {
-            if let Some(var_ident) = typed_expr.expr.var_ident() {
+            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
                     self.expr_regs.insert(typed_expr.id, *vreg);
                 } else {
@@ -893,40 +893,40 @@ impl ToTokenStream for ReturnType {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         match self {
             ReturnType::Default => {}
-            ReturnType::Type(ty) => {
+            ReturnType::Type(_span, ty) => {
                 token::RArrow::default().to_tokens(tokens);
-                ty.to_tokens(tokens, context);
+                ty.0.to_tokens(tokens, context);
             }
         }
     }
 }
 impl ToTokenStream for BareFnArg {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
-        if let Some(ident) = self.name.as_ref() {
+        if let Some((ident, colon_token)) = self.name.as_ref() {
             ident.to_tokens(tokens);
             token::Colon::default().to_tokens(tokens);
         }
-        self.ty.to_tokens(tokens, context);
+        self.ty.0.to_tokens(tokens, context);
     }
 }
 impl ToTokenStream for Type {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         match self {
-            Type::Array { elem, len } => {
+            Type::Array { elem, len, .. } => {
                 token::Bracket::default().surround(tokens, |inner| {
                     elem.to_tokens(inner, context);
                     token::Semi::default().to_tokens(inner);
                     len.to_tokens(inner, context);
                 });
             }
-            Type::BareFn { inputs, output } => {
+            Type::BareFn { inputs, output, .. } => {
                 token::Fn::default().to_tokens(tokens);
                 token::Paren::default().surround(tokens, |inner| {
                     for input in inputs {
                         input.to_tokens(inner, context);
                     }
                 });
-                output.to_tokens(tokens, context);
+                output.0.to_tokens(tokens, context);
             }
             Type::Path(path) => {
                 path.to_tokens(tokens);
@@ -935,25 +935,26 @@ impl ToTokenStream for Type {
                 lifetime,
                 mutability,
                 elem,
+                ..
             } => {
                 token::And::default().to_tokens(tokens);
                 if let Some(lifetime) = lifetime {
                     lifetime.to_tokens(tokens);
                 }
-                if *mutability {
+                if mutability.is_some() {
                     token::Mut::default().to_tokens(tokens);
                 }
-                elem.to_tokens(tokens, context);
+                elem.0.to_tokens(tokens, context);
             }
-            Type::Slice(ty) => {
+            Type::Slice { elem, .. } => {
                 token::Bracket::default().surround(tokens, |inner| {
-                    ty.to_tokens(inner, context);
+                    elem.0.to_tokens(inner, context);
                 });
             }
-            Type::Tuple(types) => token::Paren::default().surround(tokens, |inner| {
-                for (idx, ty) in types.iter().enumerate() {
-                    ty.to_tokens(inner, context);
-                    if idx != types.len() - 1 {
+            Type::Tuple { elems, .. } => token::Paren::default().surround(tokens, |inner| {
+                for (idx, elem) in elems.iter().enumerate() {
+                    elem.0.to_tokens(inner, context);
+                    if idx != elems.len() - 1 {
                         token::Comma::default().to_tokens(inner);
                     }
                 }
@@ -965,15 +966,15 @@ impl ToTokenStream for Pattern {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         match self {
             Pattern::Ident { mutability, ident } => {
-                if *mutability {
+                if mutability.is_some() {
                     token::Mut::default().to_tokens(tokens);
                 }
                 ident.to_tokens(tokens);
             }
-            Pattern::Type { pat, ty } => {
-                pat.to_tokens(tokens, context);
+            Pattern::Type { pat, ty, .. } => {
+                pat.0.to_tokens(tokens, context);
                 token::Colon::default().to_tokens(tokens);
-                ty.to_tokens(tokens, context);
+                ty.0.to_tokens(tokens, context);
             }
             Pattern::Range { lo, limits, hi } => {
                 lo.to_tokens(tokens, context);
@@ -990,7 +991,7 @@ impl ToTokenStream for Pattern {
             Pattern::Path(path) => {
                 path.to_tokens(tokens);
             }
-            Pattern::Wild => {
+            Pattern::Wild(_) => {
                 token::Underscore::default().to_tokens(tokens);
             }
         }
@@ -1002,13 +1003,13 @@ impl ToTokenStream for Expression {
 
 impl ToTokenStream for TypedExpression {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
-        match &self.expr {
+        match &self.expr.0 {
             Expression::Array(arr) => {
                 arr.to_tokens(tokens);
             }
             // TODO: Optimize by using left expression's register.
             // x = y + x;
-            Expression::Assign { left, right } => {
+            Expression::Assign { left, right, .. } => {
                 // === ASM ===
                 // asm!("xxx");
                 // asm!("xxx");
@@ -1042,7 +1043,7 @@ impl ToTokenStream for TypedExpression {
                 // }
                 tokens.extend(Some(context.gen_tokens(self, true, None, 0)));
             }
-            Expression::Call { func, args } => {
+            Expression::Call { func, args, .. } => {
                 func.to_tokens(tokens, context);
                 token::Paren::default().surround(tokens, |inner| {
                     for (idx, ty) in args.iter().enumerate() {
@@ -1057,6 +1058,7 @@ impl ToTokenStream for TypedExpression {
                 receiver,
                 method,
                 args,
+                ..
             } => {
                 // FIXME: use rvv assembler (overflowing_add/overflowing_sub ...)
                 receiver.to_tokens(tokens, context);
@@ -1078,17 +1080,17 @@ impl ToTokenStream for TypedExpression {
                 op.to_tokens(tokens);
                 expr.to_tokens(tokens, context);
             }
-            Expression::Field { base, member } => {
+            Expression::Field { base, member, .. } => {
                 base.to_tokens(tokens, context);
                 token::Dot::default().to_tokens(tokens);
                 member.to_tokens(tokens);
             }
-            Expression::Cast { expr, ty } => {
+            Expression::Cast { expr, ty, .. } => {
                 expr.to_tokens(tokens, context);
                 token::As::default().to_tokens(tokens);
-                ty.to_tokens(tokens, context);
+                ty.0.to_tokens(tokens, context);
             }
-            Expression::Repeat { expr, len } => {
+            Expression::Repeat { expr, len, .. } => {
                 token::Bracket::default().surround(tokens, |inner| {
                     expr.to_tokens(inner, context);
                     token::Semi::default().to_tokens(inner);
@@ -1098,19 +1100,21 @@ impl ToTokenStream for TypedExpression {
             Expression::Lit(lit) => {
                 lit.to_tokens(tokens);
             }
-            Expression::Paren(expr) => {
+            Expression::Paren { expr, .. } => {
                 token::Paren::default().surround(tokens, |inner| {
                     expr.to_tokens(inner, context);
                 });
             }
-            Expression::Reference { mutability, expr } => {
+            Expression::Reference {
+                mutability, expr, ..
+            } => {
                 token::And::default().to_tokens(tokens);
-                if *mutability {
+                if mutability.is_some() {
                     token::Mut::default().to_tokens(tokens);
                 }
                 expr.to_tokens(tokens, context);
             }
-            Expression::Index { expr, index } => {
+            Expression::Index { expr, index, .. } => {
                 expr.to_tokens(tokens, context);
                 token::Bracket::default().surround(tokens, |inner| {
                     index.to_tokens(inner, context);
@@ -1119,15 +1123,15 @@ impl ToTokenStream for TypedExpression {
             Expression::Path(path) => {
                 path.to_tokens(tokens);
             }
-            Expression::Break => {
+            Expression::Break(_) => {
                 token::Break::default().to_tokens(tokens);
             }
-            Expression::Continue => {
+            Expression::Continue(_) => {
                 token::Continue::default().to_tokens(tokens);
             }
-            Expression::Return(expr_opt) => {
+            Expression::Return { expr, .. } => {
                 token::Return::default().to_tokens(tokens);
-                if let Some(expr) = expr_opt.as_ref() {
+                if let Some(expr) = expr.as_ref() {
                     expr.to_tokens(tokens, context);
                 }
             }
@@ -1138,11 +1142,12 @@ impl ToTokenStream for TypedExpression {
                 cond,
                 then_branch,
                 else_branch,
+                ..
             } => {
                 token::If::default().to_tokens(tokens);
                 cond.to_tokens(tokens, context);
                 then_branch.to_tokens(tokens, context);
-                if let Some(expr) = else_branch.as_ref() {
+                if let Some((_span, expr)) = else_branch.as_ref() {
                     token::Else::default().to_tokens(tokens);
                     expr.to_tokens(tokens, context);
                 }
@@ -1163,13 +1168,15 @@ impl ToTokenStream for TypedExpression {
                     expr.to_tokens(tokens, context);
                 }
             }
-            Expression::Loop(body) => {
+            Expression::Loop { body, .. } => {
                 token::Loop::default().to_tokens(tokens);
                 body.to_tokens(tokens, context);
             }
-            Expression::ForLoop { pat, expr, body } => {
+            Expression::ForLoop {
+                pat, expr, body, ..
+            } => {
                 token::For::default().to_tokens(tokens);
-                pat.to_tokens(tokens, context);
+                pat.0.to_tokens(tokens, context);
                 token::In::default().to_tokens(tokens);
                 expr.to_tokens(tokens, context);
                 body.to_tokens(tokens, context);
@@ -1183,9 +1190,9 @@ impl ToTokenStream for TypedExpression {
 impl ToTokenStream for Statement {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         match self {
-            Statement::Local { pat, init } => {
+            Statement::Local { pat, init, .. } => {
                 token::Let::default().to_tokens(tokens);
-                pat.to_tokens(tokens, context);
+                pat.0.to_tokens(tokens, context);
                 token::Eq::default().to_tokens(tokens);
                 init.to_tokens(tokens, context);
                 token::Semi::default().to_tokens(tokens);
@@ -1204,19 +1211,19 @@ impl ToTokenStream for Block {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
         token::Brace::default().surround(tokens, |inner| {
             for stmt in &self.stmts {
-                stmt.to_tokens(inner, context);
+                stmt.0.to_tokens(inner, context);
             }
         })
     }
 }
 impl ToTokenStream for FnArg {
     fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
-        if self.mutability {
+        if self.mutability.is_some() {
             token::Mut::default().to_tokens(tokens);
         }
         self.name.to_tokens(tokens);
         token::Colon::default().to_tokens(tokens);
-        self.ty.to_tokens(tokens, context);
+        self.ty.0.to_tokens(tokens, context);
     }
 }
 impl ToTokenStream for Signature {
@@ -1231,7 +1238,7 @@ impl ToTokenStream for Signature {
                 }
             }
         });
-        self.output.to_tokens(tokens, context);
+        self.output.0.to_tokens(tokens, context);
     }
 }
 impl ToTokenStream for ItemFn {
@@ -1251,16 +1258,16 @@ mod test {
 
     fn rvv_test(item: TokenStream) -> Result<TokenStream, Error> {
         let input: syn::ItemFn = syn::parse2(item).unwrap();
-        let mut out = ItemFn::try_from(&input)?;
+        let mut out = ItemFn::try_from(&input).map_err(|(span, err)| err)?;
         let mut checker_context = CheckerContext::default();
         out.check_types(&mut checker_context)?;
 
         println!("[variables]:");
         for (ident, (mutability, ty)) in &checker_context.variables {
-            if *mutability {
-                println!("  [mut {:6}] => {:?}", ident, ty);
+            if mutability.is_some() {
+                println!("  [mut {:6}] => {:?}", ident, ty.0);
             } else {
-                println!("  [{:10}] => {:?}", ident, ty);
+                println!("  [{:10}] => {:?}", ident, ty.0);
             }
         }
         println!("[literal exprs]:");

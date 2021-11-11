@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::fmt;
 
 use anyhow::{anyhow, bail, Error};
-use proc_macro2::{Span as SynSpan, TokenStream};
+use proc_macro2::Span as Span2;
+use syn::token;
 
 #[derive(Debug, Clone, Copy)]
-pub struct Span(pub SynSpan);
+pub struct Span(pub Span2);
 
 impl Ord for Span {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -54,13 +55,24 @@ impl fmt::Display for Span {
     }
 }
 
-impl From<SynSpan> for Span {
-    fn from(x: SynSpan) -> Span {
+impl From<Span2> for Span {
+    fn from(x: Span2) -> Span {
         Span(x)
     }
 }
+impl Into<Span2> for Span {
+    fn into(self) -> Span2 {
+        self.0
+    }
+}
 
-pub type Spanned<T> = (T, Span);
+impl Default for Span {
+    fn default() -> Span {
+        Span2::call_site().into()
+    }
+}
+
+pub type WithSpan<T> = (T, Span);
 
 // pub struct Lifetime {
 //     pub apostrophe: Span,
@@ -75,8 +87,10 @@ pub type Spanned<T> = (T, Span);
 // An argument in a function type: the usize in fn(usize) -> bool.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BareFnArg {
-    pub name: Option<syn::Ident>,
-    pub ty: Type,
+    pub span: Span,
+
+    pub name: Option<(syn::Ident, Span)>,
+    pub ty: WithSpan<Type>,
 }
 
 // pub enum ReturnType {
@@ -86,7 +100,7 @@ pub struct BareFnArg {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum ReturnType {
     Default,
-    Type(Box<Type>),
+    Type(Span, Box<WithSpan<Type>>),
 }
 
 // pub enum Type {
@@ -117,7 +131,9 @@ pub enum Type {
     // }
     // A fixed size array type: [T; n].
     Array {
+        bracket_token: Span,
         elem: Box<Type>,
+        semi_token: Span,
         len: TypedExpression,
     },
 
@@ -133,8 +149,10 @@ pub enum Type {
     // }
     // A bare function type: fn(usize) -> bool.
     BareFn {
+        fn_token: Span,
+        paren_token: Span,
         inputs: Vec<BareFnArg>,
-        output: ReturnType,
+        output: WithSpan<ReturnType>,
     },
 
     // pub struct TypePath {
@@ -152,9 +170,10 @@ pub enum Type {
     // }
     // A reference type: &'a T or &'a mut T.
     Reference {
+        and_token: Span,
         lifetime: Option<syn::Ident>,
-        mutability: bool,
-        elem: Box<Type>,
+        mutability: Option<Span>,
+        elem: Box<WithSpan<Type>>,
     },
 
     // pub struct TypeSlice {
@@ -162,25 +181,38 @@ pub enum Type {
     //     pub elem: Box<Type>,
     // }
     // A dynamically sized slice type: [T].
-    Slice(Box<Type>),
+    Slice {
+        bracket_token: Span,
+        elem: Box<WithSpan<Type>>,
+    },
 
     // pub struct TypeTuple {
     //     pub paren_token: Paren,
     //     pub elems: Punctuated<Type, Comma>,
     // }
     // A tuple type: (A, B, C, String).
-    Tuple(Vec<Type>),
+    Tuple {
+        paren_token: Span,
+        elems: Vec<WithSpan<Type>>,
+    },
 }
 
 impl Type {
-    pub fn into_ref(self, lifetime: Option<syn::Ident>, mutability: bool) -> Type {
+    pub fn into_ref(
+        self,
+        and_token: Span,
+        lifetime: Option<syn::Ident>,
+        mutability: Option<Span>,
+        span: Span,
+    ) -> Type {
         Type::Reference {
+            and_token,
             lifetime,
             mutability,
-            elem: Box::new(self),
+            elem: Box::new((self, span)),
         }
     }
-    pub fn into_deref(self) -> Option<(bool, Box<Type>)> {
+    pub fn into_deref(self) -> Option<(Option<Span>, Box<WithSpan<Type>>)> {
         match self {
             Type::Reference {
                 mutability, elem, ..
@@ -198,7 +230,7 @@ impl Type {
     pub fn type_ident(&self) -> Option<&syn::Ident> {
         match self {
             Type::Path(path) => path.get_ident(),
-            Type::Reference { elem, .. } => elem.type_ident(),
+            Type::Reference { elem, .. } => elem.0.type_ident(),
             _ => None,
         }
     }
@@ -207,13 +239,16 @@ impl Type {
     }
 
     pub fn unit() -> Type {
-        Type::Tuple(Vec::new())
+        Type::Tuple {
+            paren_token: Span::default(),
+            elems: Vec::new(),
+        }
     }
 
     pub fn primitive(name: &'static str) -> Type {
         let mut segments = syn::punctuated::Punctuated::new();
         segments.push_value(syn::PathSegment {
-            ident: syn::Ident::new(name, SynSpan::call_site()),
+            ident: syn::Ident::new(name, Span::default().into()),
             arguments: syn::PathArguments::None,
         });
         let path = syn::Path {
@@ -254,7 +289,7 @@ pub enum Pattern {
     // }
     // A pattern that binds a new variable: mut binding.
     Ident {
-        mutability: bool,
+        mutability: Option<Span>,
         ident: syn::Ident,
     },
 
@@ -266,8 +301,9 @@ pub enum Pattern {
     // }
     // A type ascription pattern: foo: f64.
     Type {
-        pat: Box<Pattern>,
-        ty: Box<Type>,
+        pat: Box<WithSpan<Pattern>>,
+        colon_token: Span,
+        ty: Box<WithSpan<Type>>,
     },
 
     // pub struct PatRange {
@@ -307,7 +343,7 @@ pub enum Pattern {
     //     pub underscore_token: Underscore,
     // }
     // A pattern that matches any value: _.
-    Wild,
+    Wild(Span),
 }
 
 // Type information can come from:
@@ -317,24 +353,14 @@ pub enum Pattern {
 //    4. type infer
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct TypedExpression {
-    pub expr: Expression,
+    pub expr: WithSpan<Expression>,
     pub id: usize,
-    pub ty: Option<Box<Type>>,
+    pub ty: Option<Box<WithSpan<Type>>>,
 }
 
 impl TypedExpression {
     pub fn type_name(&self) -> Option<String> {
-        self.ty.as_ref().and_then(|ty| ty.type_name())
-    }
-}
-
-impl From<Expression> for TypedExpression {
-    fn from(expr: Expression) -> TypedExpression {
-        TypedExpression {
-            expr,
-            id: usize::max_value(),
-            ty: None,
-        }
+        self.ty.as_ref().and_then(|ty| ty.0.type_name())
     }
 }
 
@@ -400,6 +426,7 @@ pub enum Expression {
     // An assignment expression: a = compute().
     Assign {
         left: Box<TypedExpression>,
+        eq_token: Span,
         right: Box<TypedExpression>,
     },
 
@@ -450,6 +477,7 @@ pub enum Expression {
     // A function call expression: invoke(a, b).
     Call {
         func: Box<TypedExpression>,
+        paren_token: Span,
         args: Vec<TypedExpression>,
     },
 
@@ -465,7 +493,9 @@ pub enum Expression {
     // A method call expression: x.foo::<T>(a, b).
     MethodCall {
         receiver: Box<TypedExpression>,
+        dot_token: Span,
         method: syn::Ident,
+        paren_token: Span,
         args: Vec<TypedExpression>,
     },
 
@@ -496,6 +526,7 @@ pub enum Expression {
     // Access of a named struct field (obj.k) or unnamed tuple struct field (obj.0).
     Field {
         base: Box<TypedExpression>,
+        dot_token: Span,
         member: syn::Member,
     },
 
@@ -508,7 +539,8 @@ pub enum Expression {
     // A cast expression: foo as f64.
     Cast {
         expr: Box<TypedExpression>,
-        ty: Box<Type>,
+        as_token: Span,
+        ty: Box<WithSpan<Type>>,
     },
 
     // pub struct ExprRepeat {
@@ -520,7 +552,9 @@ pub enum Expression {
     // }
     // An array literal constructed from one repeated element: [0u8; N].
     Repeat {
+        bracket_token: Span,
         expr: Box<TypedExpression>,
+        semi_token: Span,
         len: Box<TypedExpression>,
     },
 
@@ -537,7 +571,10 @@ pub enum Expression {
     //     pub expr: Box<Expr>,
     // }
     // A parenthesized expression: (a + b).
-    Paren(Box<TypedExpression>),
+    Paren {
+        paren_token: Span,
+        expr: Box<TypedExpression>,
+    },
 
     // pub struct ExprReference {
     //     pub attrs: Vec<Attribute>,
@@ -548,7 +585,8 @@ pub enum Expression {
     // }
     // A referencing operation: &a or &mut a.
     Reference {
-        mutability: bool,
+        and_token: Span,
+        mutability: Option<Span>,
         expr: Box<TypedExpression>,
     },
 
@@ -561,6 +599,7 @@ pub enum Expression {
     // A square bracketed indexing expression: vector[2].
     Index {
         expr: Box<TypedExpression>,
+        bracket_token: Span,
         index: Box<TypedExpression>,
     },
 
@@ -580,7 +619,7 @@ pub enum Expression {
     //     pub expr: Option<Box<Expr>>,
     // }
     // A break.
-    Break,
+    Break(Span),
 
     // pub struct ExprContinue {
     //     pub attrs: Vec<Attribute>,
@@ -588,7 +627,7 @@ pub enum Expression {
     //     pub label: Option<Lifetime>,
     // }
     // A continue.
-    Continue,
+    Continue(Span),
 
     // pub struct ExprReturn {
     //     pub attrs: Vec<Attribute>,
@@ -596,7 +635,10 @@ pub enum Expression {
     //     pub expr: Option<Box<Expr>>,
     // }
     // A return.
-    Return(Option<Box<TypedExpression>>),
+    Return {
+        return_token: Span,
+        expr: Option<Box<TypedExpression>>,
+    },
 
     // pub struct ExprBlock {
     //     pub attrs: Vec<Attribute>,
@@ -615,9 +657,10 @@ pub enum Expression {
     // }
     // An if expression with an optional else block: if expr { ... } else { ... }.
     If {
+        if_token: Span,
         cond: Box<TypedExpression>,
         then_branch: Block,
-        else_branch: Option<Box<TypedExpression>>,
+        else_branch: Option<(Span, Box<TypedExpression>)>,
     },
 
     // pub struct ExprRange {
@@ -639,7 +682,10 @@ pub enum Expression {
     //     pub loop_token: Loop,
     //     pub body: Block,
     // }
-    Loop(Block),
+    Loop {
+        loop_token: Span,
+        body: Block,
+    },
 
     // pub struct ExprForLoop {
     //     pub attrs: Vec<Attribute>,
@@ -652,7 +698,9 @@ pub enum Expression {
     // }
     // for pat in expr { ... }
     ForLoop {
-        pat: Pattern,
+        for_token: Span,
+        pat: WithSpan<Pattern>,
+        in_token: Span,
         expr: Box<TypedExpression>,
         body: Block,
     },
@@ -693,7 +741,13 @@ pub enum Statement {
     //     pub semi_token: Semi,
     // }
     // A local (let) binding.
-    Local { pat: Pattern, init: TypedExpression },
+    Local {
+        let_token: Span,
+        pat: WithSpan<Pattern>,
+        eq_token: Span,
+        init: TypedExpression,
+        semi_token: Span,
+    },
 
     // Expr without trailing semicolon. (as return value)
     Expr(TypedExpression),
@@ -708,17 +762,20 @@ pub enum Statement {
 // A braced block containing Rust statements.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Block {
-    pub stmts: Vec<Statement>,
+    pub span: Span,
+
+    pub brace_token: Span,
+    pub stmts: Vec<WithSpan<Statement>>,
 }
 
 impl Block {
-    pub fn get_type(&self) -> Option<Box<Type>> {
-        if let Some(stmt) = self.stmts.last() {
+    pub fn get_type(&self) -> Option<Box<WithSpan<Type>>> {
+        if let Some((stmt, _span)) = self.stmts.last() {
             if let Statement::Expr(expr) = stmt {
                 return expr.ty.clone();
             }
         }
-        Some(Box::new(Type::unit()))
+        Some(Box::new((Type::unit(), Span::default())))
     }
 }
 
@@ -734,9 +791,12 @@ impl Block {
 // }
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct FnArg {
-    pub mutability: bool,
+    pub span: Span,
+
+    pub mutability: Option<Span>,
     pub name: syn::Ident,
-    pub ty: Box<Type>,
+    pub colon_token: Span,
+    pub ty: Box<WithSpan<Type>>,
 }
 
 // pub struct Signature {
@@ -755,9 +815,13 @@ pub struct FnArg {
 // A function signature in a implementation: fn initialize(a: T).
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Signature {
+    pub span: Span,
+
+    pub fn_token: Span,
+    pub paren_token: Span,
     pub ident: syn::Ident,
     pub inputs: Vec<FnArg>,
-    pub output: ReturnType,
+    pub output: WithSpan<ReturnType>,
 }
 
 // pub struct ItemFn {
@@ -769,6 +833,8 @@ pub struct Signature {
 // A free-standing function: fn process(n: usize) -> Result<()> { ... }.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct ItemFn {
+    pub span: Span,
+
     pub vis: syn::Visibility,
     pub sig: Signature,
     pub block: Block,

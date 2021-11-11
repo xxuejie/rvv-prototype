@@ -1,7 +1,9 @@
 #![feature(proc_macro_diagnostic)]
 
 extern crate proc_macro;
+use anyhow::anyhow;
 use proc_macro::{Diagnostic, Level, Span, TokenStream};
+use proc_macro2::Span as Span2;
 use quote::quote;
 use std::convert::TryFrom;
 use syn::{parse_macro_input, ItemFn};
@@ -54,33 +56,46 @@ use type_checker::{CheckerContext, TypeChecker};
 //   PartialEq    Trait for equality comparisons which are partial equivalence relations.
 //   PartialOrd   Trait for values that can be compared for a sort-order.
 
-pub(crate) fn emit_error<T: Into<String>>(span: proc_macro2::Span, message: T) {
-    Diagnostic::spanned(span.unwrap(), Level::Error, message).emit();
-}
-
-#[proc_macro_attribute]
-pub fn rvv_vector(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let show_asm = if !attr.is_empty() {
-        let attr = parse_macro_input!(attr as syn::Path);
-        if !attr.is_ident("show_asm") {
+fn rvv_vector_inner(
+    attr_opt: Option<syn::Path>,
+    input: ItemFn,
+) -> Result<TokenStream, (ast::Span, anyhow::Error)> {
+    let show_asm = if let Some(attr) = attr_opt {
+        if attr.is_ident("show_asm") {
             true
         } else {
-            emit_error(
-                attr.get_ident().unwrap().span(),
-                format!("unexpected attribute: {}", attr.get_ident().unwrap()),
-            );
-            false
+            let ident = attr.get_ident().unwrap();
+            return Err((
+                ident.span().into(),
+                anyhow!("unexpected attribute: {}", ident),
+            ));
         }
     } else {
         false
     };
 
-    let input = parse_macro_input!(item as ItemFn);
-    let mut out = ast::ItemFn::try_from(&input).unwrap();
+    let mut out = ast::ItemFn::try_from(&input)?;
     let mut checker_context = CheckerContext::default();
     out.check_types(&mut checker_context).unwrap();
     let mut tokens = proc_macro2::TokenStream::new();
     let mut codegen_context = CodegenContext::new(checker_context.variables, show_asm);
     out.to_tokens(&mut tokens, &mut codegen_context);
-    TokenStream::from(quote!(#tokens))
+    Ok(TokenStream::from(quote!(#tokens)))
+}
+
+#[proc_macro_attribute]
+pub fn rvv_vector(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr = if attr.is_empty() {
+        None
+    } else {
+        Some(parse_macro_input!(attr as syn::Path))
+    };
+    let input = parse_macro_input!(item as ItemFn);
+    match rvv_vector_inner(attr, input) {
+        Ok(tokens) => tokens,
+        Err((span, message)) => {
+            Diagnostic::spanned(span.0.unwrap(), Level::Error, message.to_string()).emit();
+            TokenStream::new()
+        }
+    }
 }
