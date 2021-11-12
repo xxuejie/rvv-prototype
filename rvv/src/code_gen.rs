@@ -8,9 +8,10 @@ use syn::token;
 use rvv_assembler::{Imm, Ivi, Ivv, Ivx, Uimm, VConfig, VInst, VReg, Vlmul, Vtypei, XReg};
 
 use crate::ast::{
-    BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Statement, Type,
-    TypedExpression,
+    BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Span, Statement,
+    Type, TypedExpression, WithSpan,
 };
+use crate::SpannedError;
 
 // =============================
 // ==== impl ToTokens for T ====
@@ -70,7 +71,7 @@ pub struct CodegenContext {
 
     // FIXME: fill in current module
     // ident => (mutability, Type)
-    variables: HashMap<syn::Ident, (bool, Box<Type>)>,
+    variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
 
     // [When update v_config]
     //   1. When first vector instruction used update v_config and insert asm!()
@@ -86,7 +87,7 @@ pub struct CodegenContext {
 
 impl CodegenContext {
     pub fn new(
-        variables: HashMap<syn::Ident, (bool, Box<Type>)>,
+        variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
         show_asm: bool,
     ) -> CodegenContext {
         CodegenContext {
@@ -116,7 +117,7 @@ impl CodegenContext {
         top_level: bool,
         extra_bind_id: Option<usize>,
         mut bit_length: u16,
-    ) -> TokenStream {
+    ) -> Result<TokenStream, SpannedError> {
         enum OpCategory {
             Binary,
             Bool,
@@ -126,17 +127,20 @@ impl CodegenContext {
             format_ident!("tmp_var{}", id)
         }
 
-        let (left, op, right, is_assign) = match &expr.expr {
+        let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
-            Expression::Paren(sub_expr) => {
-                let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
-                return quote! {(#ts)};
+            Expression::Paren { expr: sub_expr, .. } => {
+                let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length)?;
+                return Ok(quote! {(#ts)});
             }
-            _ => panic!("invalid top level expression: {:?}", expr),
+            _ => return Err((expr.expr.1, anyhow!("invalid top level expression"))),
         };
         if !top_level && is_assign {
-            panic!("assign op in inner top level expression");
+            return Err((
+                expr.expr.1,
+                anyhow!("assign op in inner top level expression is forbidden"),
+            ));
         }
 
         let mut tokens = TokenStream::new();
@@ -151,17 +155,20 @@ impl CodegenContext {
                 (Some("U512"), Some("U512")) => {
                     bit_length = 512;
                 }
+                (Some("U1024"), Some("U1024")) => {
+                    bit_length = 1024;
+                }
                 _ => {
-                    left.to_tokens(&mut tokens, self);
+                    left.to_tokens(&mut tokens, self)?;
                     op.to_tokens(&mut tokens);
-                    right.to_tokens(&mut tokens, self);
-                    return tokens;
+                    right.to_tokens(&mut tokens, self)?;
+                    return Ok(tokens);
                 }
             };
         }
 
         for typed_expr in [left, right] {
-            if let Some(var_ident) = typed_expr.expr.var_ident() {
+            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
                     self.expr_regs.insert(typed_expr.id, *vreg);
                 } else {
@@ -172,7 +179,7 @@ impl CodegenContext {
                 self.expr_tokens
                     .insert(typed_expr.id, (quote! {#var_ident}, bit_length));
             } else {
-                let _ts = self.gen_tokens(typed_expr, false, None, bit_length);
+                let _ts = self.gen_tokens(typed_expr, false, None, bit_length)?;
             }
         }
 
@@ -210,7 +217,14 @@ impl CodegenContext {
         let (expr1, bit_len1) = self.expr_tokens.get(&left.id).cloned().unwrap();
         let (expr2, bit_len2) = self.expr_tokens.get(&right.id).cloned().unwrap();
         if bit_len1 != bit_len2 {
-            panic!("bit length not matched");
+            return Err((
+                expr.expr.1,
+                anyhow!(
+                    "bit length not matched, left: {}, right: {}",
+                    bit_len1,
+                    bit_len2
+                ),
+            ));
         }
         if let OpCategory::Binary = op_category {
             let dvreg = self.v_registers.next_register().unwrap();
@@ -396,7 +410,7 @@ impl CodegenContext {
             };
             self.expr_tokens.insert(extra_expr_id, (ts, bit_len1));
         }
-        tokens
+        Ok(tokens)
     }
 
     // Generate raw asm statements for top level expression
@@ -407,17 +421,20 @@ impl CodegenContext {
         top_level: bool,
         extra_bind_id: Option<usize>,
         mut bit_length: u16,
-    ) -> TokenStream {
-        let (left, op, right, is_assign) = match &expr.expr {
+    ) -> Result<TokenStream, SpannedError> {
+        let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
-            Expression::Paren(sub_expr) => {
+            Expression::Paren { expr: sub_expr, .. } => {
                 return self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
             }
-            _ => panic!("invalid top level expression: {:?}", expr),
+            _ => return Err((expr.expr.1, anyhow!("invalid top level expression"))),
         };
         if !top_level && is_assign {
-            panic!("assign op in inner top level expression");
+            return Err((
+                expr.expr.1,
+                anyhow!("assign op in inner top level expression is forbidden"),
+            ));
         }
 
         let mut tokens = TokenStream::new();
@@ -433,10 +450,10 @@ impl CodegenContext {
                     vtypei: Vtypei::new(256, Vlmul::M1, true, true),
                 },
                 _ => {
-                    left.to_tokens(&mut tokens, self);
+                    left.to_tokens(&mut tokens, self)?;
                     op.to_tokens(&mut tokens);
-                    right.to_tokens(&mut tokens, self);
-                    return tokens;
+                    right.to_tokens(&mut tokens, self)?;
+                    return Ok(tokens);
                 }
             };
             if self.v_config.as_ref() != Some(&v_config) {
@@ -463,7 +480,7 @@ impl CodegenContext {
         }
 
         for typed_expr in [left, right] {
-            if let Some(var_ident) = typed_expr.expr.var_ident() {
+            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
                     self.expr_regs.insert(typed_expr.id, *vreg);
                 } else {
@@ -498,7 +515,7 @@ impl CodegenContext {
                     self.expr_regs.insert(typed_expr.id, vreg);
                 }
             } else {
-                let ts = self.gen_tokens(typed_expr, false, None, bit_length);
+                let ts = self.gen_tokens(typed_expr, false, None, bit_length)?;
                 tokens.extend(Some(ts));
             }
         }
@@ -867,21 +884,34 @@ impl CodegenContext {
             token::Brace::default().surround(&mut rv, |inner| {
                 inner.extend(Some(tokens));
             });
-            rv
+            Ok(rv)
         } else {
-            tokens
+            Ok(tokens)
         }
     }
 }
 
-pub trait ToTokenStream {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext);
-    fn to_token_stream(&self, context: &mut CodegenContext) -> TokenStream {
-        let mut tokens = TokenStream::new();
-        self.to_tokens(&mut tokens, context);
-        tokens
+fn catch_inner_error<F: FnOnce(&mut Option<SpannedError>)>(func: F) -> Result<(), SpannedError> {
+    let mut err: Option<SpannedError> = None;
+    func(&mut err);
+    if let Some(err) = err {
+        return Err(err);
     }
-    fn into_token_stream(self, context: &mut CodegenContext) -> TokenStream
+    Ok(())
+}
+
+pub trait ToTokenStream {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError>;
+    fn to_token_stream(&self, context: &mut CodegenContext) -> Result<TokenStream, SpannedError> {
+        let mut tokens = TokenStream::new();
+        self.to_tokens(&mut tokens, context)?;
+        Ok(tokens)
+    }
+    fn into_token_stream(self, context: &mut CodegenContext) -> Result<TokenStream, SpannedError>
     where
         Self: Sized,
     {
@@ -890,43 +920,71 @@ pub trait ToTokenStream {
 }
 
 impl ToTokenStream for ReturnType {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
         match self {
             ReturnType::Default => {}
-            ReturnType::Type(ty) => {
+            ReturnType::Type(_span, ty) => {
                 token::RArrow::default().to_tokens(tokens);
-                ty.to_tokens(tokens, context);
+                ty.0.to_tokens(tokens, context)?;
             }
         }
+        Ok(())
     }
 }
 impl ToTokenStream for BareFnArg {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
-        if let Some(ident) = self.name.as_ref() {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
+        if let Some((ident, colon_token)) = self.name.as_ref() {
             ident.to_tokens(tokens);
             token::Colon::default().to_tokens(tokens);
         }
-        self.ty.to_tokens(tokens, context);
+        self.ty.0.to_tokens(tokens, context)?;
+        Ok(())
     }
 }
+
 impl ToTokenStream for Type {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
         match self {
-            Type::Array { elem, len } => {
-                token::Bracket::default().surround(tokens, |inner| {
-                    elem.to_tokens(inner, context);
-                    token::Semi::default().to_tokens(inner);
-                    len.to_tokens(inner, context);
-                });
+            Type::Array { elem, len, .. } => {
+                catch_inner_error(|err| {
+                    token::Bracket::default().surround(tokens, |inner| {
+                        if let Err(inner_err) = elem.to_tokens(inner, context) {
+                            *err = Some(inner_err);
+                            return;
+                        }
+                        token::Semi::default().to_tokens(inner);
+                        if let Err(inner_err) = len.to_tokens(inner, context) {
+                            *err = Some(inner_err);
+                            return;
+                        };
+                    });
+                })?;
             }
-            Type::BareFn { inputs, output } => {
+            Type::BareFn { inputs, output, .. } => {
                 token::Fn::default().to_tokens(tokens);
-                token::Paren::default().surround(tokens, |inner| {
-                    for input in inputs {
-                        input.to_tokens(inner, context);
-                    }
-                });
-                output.to_tokens(tokens, context);
+                catch_inner_error(|err| {
+                    token::Paren::default().surround(tokens, |inner| {
+                        for input in inputs {
+                            if let Err(inner_err) = input.to_tokens(inner, context) {
+                                *err = Some(inner_err);
+                                return;
+                            }
+                        }
+                    });
+                })?;
+                output.0.to_tokens(tokens, context)?;
             }
             Type::Path(path) => {
                 path.to_tokens(tokens);
@@ -935,48 +993,66 @@ impl ToTokenStream for Type {
                 lifetime,
                 mutability,
                 elem,
+                ..
             } => {
                 token::And::default().to_tokens(tokens);
                 if let Some(lifetime) = lifetime {
                     lifetime.to_tokens(tokens);
                 }
-                if *mutability {
+                if mutability.is_some() {
                     token::Mut::default().to_tokens(tokens);
                 }
-                elem.to_tokens(tokens, context);
+                elem.0.to_tokens(tokens, context)?;
             }
-            Type::Slice(ty) => {
-                token::Bracket::default().surround(tokens, |inner| {
-                    ty.to_tokens(inner, context);
-                });
+            Type::Slice { elem, .. } => {
+                catch_inner_error(|err| {
+                    token::Bracket::default().surround(tokens, |inner| {
+                        if let Err(inner_err) = elem.0.to_tokens(inner, context) {
+                            *err = Some(inner_err);
+                            return;
+                        }
+                    });
+                })?;
             }
-            Type::Tuple(types) => token::Paren::default().surround(tokens, |inner| {
-                for (idx, ty) in types.iter().enumerate() {
-                    ty.to_tokens(inner, context);
-                    if idx != types.len() - 1 {
-                        token::Comma::default().to_tokens(inner);
-                    }
-                }
-            }),
+            Type::Tuple { elems, .. } => {
+                catch_inner_error(|err| {
+                    token::Paren::default().surround(tokens, |inner| {
+                        for (idx, elem) in elems.iter().enumerate() {
+                            if let Err(inner_err) = elem.0.to_tokens(inner, context) {
+                                *err = Some(inner_err);
+                                return;
+                            }
+                            if idx != elems.len() - 1 {
+                                token::Comma::default().to_tokens(inner);
+                            }
+                        }
+                    });
+                })?;
+            }
         }
+        Ok(())
     }
 }
 impl ToTokenStream for Pattern {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
         match self {
             Pattern::Ident { mutability, ident } => {
-                if *mutability {
+                if mutability.is_some() {
                     token::Mut::default().to_tokens(tokens);
                 }
                 ident.to_tokens(tokens);
             }
-            Pattern::Type { pat, ty } => {
-                pat.to_tokens(tokens, context);
+            Pattern::Type { pat, ty, .. } => {
+                pat.0.to_tokens(tokens, context)?;
                 token::Colon::default().to_tokens(tokens);
-                ty.to_tokens(tokens, context);
+                ty.0.to_tokens(tokens, context)?;
             }
             Pattern::Range { lo, limits, hi } => {
-                lo.to_tokens(tokens, context);
+                lo.to_tokens(tokens, context)?;
                 match limits {
                     syn::RangeLimits::HalfOpen(inner) => {
                         inner.to_tokens(tokens);
@@ -985,30 +1061,41 @@ impl ToTokenStream for Pattern {
                         inner.to_tokens(tokens);
                     }
                 }
-                hi.to_tokens(tokens, context);
+                hi.to_tokens(tokens, context)?;
             }
             Pattern::Path(path) => {
                 path.to_tokens(tokens);
             }
-            Pattern::Wild => {
+            Pattern::Wild(_) => {
                 token::Underscore::default().to_tokens(tokens);
             }
         }
+        Ok(())
     }
 }
 impl ToTokenStream for Expression {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {}
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
+        Ok(())
+    }
 }
 
 impl ToTokenStream for TypedExpression {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
-        match &self.expr {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
+        match &self.expr.0 {
             Expression::Array(arr) => {
                 arr.to_tokens(tokens);
             }
             // TODO: Optimize by using left expression's register.
             // x = y + x;
-            Expression::Assign { left, right } => {
+            Expression::Assign { left, right, .. } => {
                 // === ASM ===
                 // asm!("xxx");
                 // asm!("xxx");
@@ -1019,9 +1106,9 @@ impl ToTokenStream for TypedExpression {
                 //     x = #y.overflowing_add(#z).0
                 // }
 
-                left.to_tokens(tokens, context);
+                left.to_tokens(tokens, context)?;
                 token::Eq::default().to_tokens(tokens);
-                right.to_tokens(tokens, context);
+                right.to_tokens(tokens, context)?;
             }
             // x += y;
             Expression::AssignOp { left, op, right } => {
@@ -1029,7 +1116,7 @@ impl ToTokenStream for TypedExpression {
                 // asm!("xxx");
                 // asm!("xxx");
                 // asm!("xxx", in(reg) left.as_mut_ptr());
-                tokens.extend(Some(context.gen_tokens(self, true, None, 0)));
+                tokens.extend(Some(context.gen_tokens(self, true, None, 0)?));
             }
             Expression::Binary { left, op, right } => {
                 // {
@@ -1040,116 +1127,148 @@ impl ToTokenStream for TypedExpression {
                 //     asm!("xxx", in(reg) rvv_vector_out.as_mut_ptr());
                 //     rvv_vector_out
                 // }
-                tokens.extend(Some(context.gen_tokens(self, true, None, 0)));
+                tokens.extend(Some(context.gen_tokens(self, true, None, 0)?));
             }
-            Expression::Call { func, args } => {
-                func.to_tokens(tokens, context);
-                token::Paren::default().surround(tokens, |inner| {
-                    for (idx, ty) in args.iter().enumerate() {
-                        ty.to_tokens(inner, context);
-                        if idx != args.len() - 1 {
-                            token::Comma::default().to_tokens(inner);
+            Expression::Call { func, args, .. } => {
+                func.to_tokens(tokens, context)?;
+                catch_inner_error(|err| {
+                    token::Paren::default().surround(tokens, |inner| {
+                        for (idx, ty) in args.iter().enumerate() {
+                            if let Err(inner_err) = ty.to_tokens(inner, context) {
+                                *err = Some(inner_err);
+                                return;
+                            };
+                            if idx != args.len() - 1 {
+                                token::Comma::default().to_tokens(inner);
+                            }
                         }
-                    }
-                });
+                    });
+                })?;
             }
             Expression::MethodCall {
                 receiver,
                 method,
                 args,
+                ..
             } => {
                 // FIXME: use rvv assembler (overflowing_add/overflowing_sub ...)
-                receiver.to_tokens(tokens, context);
+                receiver.to_tokens(tokens, context)?;
                 token::Dot::default().to_tokens(tokens);
                 method.to_tokens(tokens);
-                token::Paren::default().surround(tokens, |inner| {
-                    for (idx, ty) in args.iter().enumerate() {
-                        ty.to_tokens(inner, context);
-                        if idx != args.len() - 1 {
-                            token::Comma::default().to_tokens(inner);
+                catch_inner_error(|err| {
+                    token::Paren::default().surround(tokens, |inner| {
+                        for (idx, ty) in args.iter().enumerate() {
+                            if let Err(inner_err) = ty.to_tokens(inner, context) {
+                                *err = Some(inner_err);
+                                return;
+                            }
+                            if idx != args.len() - 1 {
+                                token::Comma::default().to_tokens(inner);
+                            }
                         }
-                    }
-                });
+                    });
+                })?;
             }
             Expression::Macro(mac) => {
                 mac.to_tokens(tokens);
             }
             Expression::Unary { op, expr } => {
                 op.to_tokens(tokens);
-                expr.to_tokens(tokens, context);
+                expr.to_tokens(tokens, context)?;
             }
-            Expression::Field { base, member } => {
-                base.to_tokens(tokens, context);
+            Expression::Field { base, member, .. } => {
+                base.to_tokens(tokens, context)?;
                 token::Dot::default().to_tokens(tokens);
                 member.to_tokens(tokens);
             }
-            Expression::Cast { expr, ty } => {
-                expr.to_tokens(tokens, context);
+            Expression::Cast { expr, ty, .. } => {
+                expr.to_tokens(tokens, context)?;
                 token::As::default().to_tokens(tokens);
-                ty.to_tokens(tokens, context);
+                ty.0.to_tokens(tokens, context)?;
             }
-            Expression::Repeat { expr, len } => {
-                token::Bracket::default().surround(tokens, |inner| {
-                    expr.to_tokens(inner, context);
-                    token::Semi::default().to_tokens(inner);
-                    len.to_tokens(inner, context);
-                });
+            Expression::Repeat { expr, len, .. } => {
+                catch_inner_error(|err| {
+                    token::Bracket::default().surround(tokens, |inner| {
+                        if let Err(inner_err) = expr.to_tokens(inner, context) {
+                            *err = Some(inner_err);
+                            return;
+                        };
+                        token::Semi::default().to_tokens(inner);
+                        if let Err(inner_err) = len.to_tokens(inner, context) {
+                            *err = Some(inner_err);
+                            return;
+                        }
+                    });
+                })?;
             }
             Expression::Lit(lit) => {
                 lit.to_tokens(tokens);
             }
-            Expression::Paren(expr) => {
-                token::Paren::default().surround(tokens, |inner| {
-                    expr.to_tokens(inner, context);
-                });
+            Expression::Paren { expr, .. } => {
+                catch_inner_error(|err| {
+                    token::Paren::default().surround(tokens, |inner| {
+                        if let Err(inner_err) = expr.to_tokens(inner, context) {
+                            *err = Some(inner_err);
+                            return;
+                        }
+                    });
+                })?;
             }
-            Expression::Reference { mutability, expr } => {
+            Expression::Reference {
+                mutability, expr, ..
+            } => {
                 token::And::default().to_tokens(tokens);
-                if *mutability {
+                if mutability.is_some() {
                     token::Mut::default().to_tokens(tokens);
                 }
-                expr.to_tokens(tokens, context);
+                expr.to_tokens(tokens, context)?;
             }
-            Expression::Index { expr, index } => {
-                expr.to_tokens(tokens, context);
-                token::Bracket::default().surround(tokens, |inner| {
-                    index.to_tokens(inner, context);
-                });
+            Expression::Index { expr, index, .. } => {
+                expr.to_tokens(tokens, context)?;
+                catch_inner_error(|err| {
+                    token::Bracket::default().surround(tokens, |inner| {
+                        if let Err(inner_err) = index.to_tokens(inner, context) {
+                            *err = Some(inner_err);
+                            return;
+                        }
+                    });
+                })?;
             }
             Expression::Path(path) => {
                 path.to_tokens(tokens);
             }
-            Expression::Break => {
+            Expression::Break(_) => {
                 token::Break::default().to_tokens(tokens);
             }
-            Expression::Continue => {
+            Expression::Continue(_) => {
                 token::Continue::default().to_tokens(tokens);
             }
-            Expression::Return(expr_opt) => {
+            Expression::Return { expr, .. } => {
                 token::Return::default().to_tokens(tokens);
-                if let Some(expr) = expr_opt.as_ref() {
-                    expr.to_tokens(tokens, context);
+                if let Some(expr) = expr.as_ref() {
+                    expr.to_tokens(tokens, context)?;
                 }
             }
             Expression::Block(block) => {
-                block.to_tokens(tokens, context);
+                block.to_tokens(tokens, context)?;
             }
             Expression::If {
                 cond,
                 then_branch,
                 else_branch,
+                ..
             } => {
                 token::If::default().to_tokens(tokens);
-                cond.to_tokens(tokens, context);
-                then_branch.to_tokens(tokens, context);
-                if let Some(expr) = else_branch.as_ref() {
+                cond.to_tokens(tokens, context)?;
+                then_branch.to_tokens(tokens, context)?;
+                if let Some((_span, expr)) = else_branch.as_ref() {
                     token::Else::default().to_tokens(tokens);
-                    expr.to_tokens(tokens, context);
+                    expr.to_tokens(tokens, context)?;
                 }
             }
             Expression::Range { from, limits, to } => {
                 if let Some(expr) = from.as_ref() {
-                    expr.to_tokens(tokens, context);
+                    expr.to_tokens(tokens, context)?;
                 }
                 match limits {
                     syn::RangeLimits::HalfOpen(inner) => {
@@ -1160,85 +1279,126 @@ impl ToTokenStream for TypedExpression {
                     }
                 }
                 if let Some(expr) = to.as_ref() {
-                    expr.to_tokens(tokens, context);
+                    expr.to_tokens(tokens, context)?;
                 }
             }
-            Expression::Loop(body) => {
+            Expression::Loop { body, .. } => {
                 token::Loop::default().to_tokens(tokens);
-                body.to_tokens(tokens, context);
+                body.to_tokens(tokens, context)?;
             }
-            Expression::ForLoop { pat, expr, body } => {
+            Expression::ForLoop {
+                pat, expr, body, ..
+            } => {
                 token::For::default().to_tokens(tokens);
-                pat.to_tokens(tokens, context);
+                pat.0.to_tokens(tokens, context)?;
                 token::In::default().to_tokens(tokens);
-                expr.to_tokens(tokens, context);
-                body.to_tokens(tokens, context);
+                expr.to_tokens(tokens, context)?;
+                body.to_tokens(tokens, context)?;
             }
         }
         if self.id == usize::max_value() {
-            panic!("Current expression not assgined with an id: {:?}", self);
+            panic!(
+                "[Bug]: current expression not assgined with an id: {:?}",
+                self
+            );
         }
+        Ok(())
     }
 }
 impl ToTokenStream for Statement {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
         match self {
-            Statement::Local { pat, init } => {
+            Statement::Local { pat, init, .. } => {
                 token::Let::default().to_tokens(tokens);
-                pat.to_tokens(tokens, context);
+                pat.0.to_tokens(tokens, context)?;
                 token::Eq::default().to_tokens(tokens);
-                init.to_tokens(tokens, context);
+                init.to_tokens(tokens, context)?;
                 token::Semi::default().to_tokens(tokens);
             }
             Statement::Expr(expr) => {
-                expr.to_tokens(tokens, context);
+                expr.to_tokens(tokens, context)?;
             }
             Statement::Semi(expr) => {
-                expr.to_tokens(tokens, context);
+                expr.to_tokens(tokens, context)?;
                 token::Semi::default().to_tokens(tokens);
             }
         }
+        Ok(())
     }
 }
 impl ToTokenStream for Block {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
-        token::Brace::default().surround(tokens, |inner| {
-            for stmt in &self.stmts {
-                stmt.to_tokens(inner, context);
-            }
-        })
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
+        catch_inner_error(|err| {
+            token::Brace::default().surround(tokens, |inner| {
+                for stmt in &self.stmts {
+                    if let Err(inner_err) = stmt.0.to_tokens(inner, context) {
+                        *err = Some(inner_err);
+                        return;
+                    }
+                }
+            });
+        })?;
+        Ok(())
     }
 }
 impl ToTokenStream for FnArg {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
-        if self.mutability {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
+        if self.mutability.is_some() {
             token::Mut::default().to_tokens(tokens);
         }
         self.name.to_tokens(tokens);
         token::Colon::default().to_tokens(tokens);
-        self.ty.to_tokens(tokens, context);
+        self.ty.0.to_tokens(tokens, context)?;
+        Ok(())
     }
 }
 impl ToTokenStream for Signature {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
         token::Fn::default().to_tokens(tokens);
         self.ident.to_tokens(tokens);
-        token::Paren::default().surround(tokens, |inner| {
-            for (idx, input) in self.inputs.iter().enumerate() {
-                input.to_tokens(inner, context);
-                if idx != self.inputs.len() - 1 {
-                    token::Comma::default().to_tokens(inner);
+        catch_inner_error(|err| {
+            token::Paren::default().surround(tokens, |inner| {
+                for (idx, input) in self.inputs.iter().enumerate() {
+                    if let Err(inner_err) = input.to_tokens(inner, context) {
+                        *err = Some(inner_err);
+                        break;
+                    };
+                    if idx != self.inputs.len() - 1 {
+                        token::Comma::default().to_tokens(inner);
+                    }
                 }
-            }
-        });
-        self.output.to_tokens(tokens, context);
+            });
+        })?;
+        self.output.0.to_tokens(tokens, context)?;
+        Ok(())
     }
 }
 impl ToTokenStream for ItemFn {
-    fn to_tokens(&self, tokens: &mut TokenStream, context: &mut CodegenContext) {
+    fn to_tokens(
+        &self,
+        tokens: &mut TokenStream,
+        context: &mut CodegenContext,
+    ) -> Result<(), SpannedError> {
         self.vis.to_tokens(tokens);
-        self.sig.to_tokens(tokens, context);
-        self.block.to_tokens(tokens, context);
+        self.sig.to_tokens(tokens, context)?;
+        self.block.to_tokens(tokens, context)?;
+        Ok(())
     }
 }
 
@@ -1249,7 +1409,7 @@ mod test {
     use super::*;
     use crate::type_checker::{CheckerContext, TypeChecker};
 
-    fn rvv_test(item: TokenStream) -> Result<TokenStream, Error> {
+    fn rvv_test(item: TokenStream) -> Result<TokenStream, SpannedError> {
         let input: syn::ItemFn = syn::parse2(item).unwrap();
         let mut out = ItemFn::try_from(&input)?;
         let mut checker_context = CheckerContext::default();
@@ -1257,10 +1417,10 @@ mod test {
 
         println!("[variables]:");
         for (ident, (mutability, ty)) in &checker_context.variables {
-            if *mutability {
-                println!("  [mut {:6}] => {:?}", ident, ty);
+            if mutability.is_some() {
+                println!("  [mut {:6}] => {:?}", ident, ty.0);
             } else {
-                println!("  [{:10}] => {:?}", ident, ty);
+                println!("  [{:10}] => {:?}", ident, ty.0);
             }
         }
         println!("[literal exprs]:");
@@ -1276,7 +1436,7 @@ mod test {
         let show_asm = true;
         let mut tokens = TokenStream::new();
         let mut codegen_context = CodegenContext::new(checker_context.variables, show_asm);
-        out.to_tokens(&mut tokens, &mut codegen_context);
+        out.to_tokens(&mut tokens, &mut codegen_context)?;
         // println!("out: {:#?}", out);
         Ok(TokenStream::from(quote!(#tokens)))
     }
@@ -1342,30 +1502,58 @@ mod test {
                 z
             }
         };
-        let expected_output = quote! {
-            fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
-                let x_bytes = x.to_le_bytes();
-                let j = x.overflowing_add((z.overflowing_mul(y).0)).0;
-                if x > y && y == z {
-                    z = x & (z | y);
+        println!("[input ]: {}", input);
+        let output = rvv_test(input).unwrap();
+        println!("[otuput]: {}", output);
+
+        #[cfg(feature = "simulator")]
+        {
+            let expected_output = quote! {
+                fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
+                    let x_bytes = x.to_le_bytes();
+                    let j = x.overflowing_add((z.overflowing_mul(y).0)).0;
+                    if x > y && y == z {
+                        z = x & (z | y);
+                    }
+                    z = (x.overflowing_sub(y).0).overflowing_mul(x).0;
+                    let abc = 3456;
+                    z = (y
+                         .overflowing_add(j.overflowing_mul((y.overflowing_sub(x).0)).0)
+                         .0);
+                    z = z.overflowing_add(z).0;
+                    z = z.overflowing_sub(y).0;
+                    z = z.overflowing_mul(y).0;
+                    z = z.overflowing_add(y).0;
+                    z %= y;
+                    z >>= y;
+                    z
                 }
-                z = (x.overflowing_sub(y).0).overflowing_mul(x).0;
-                let abc = 3456;
-                z = (y
-                     .overflowing_add(j.overflowing_mul((y.overflowing_sub(x).0)).0)
-                     .0);
-                z = z.overflowing_add(z).0;
-                z = z.overflowing_sub(y).0;
-                z = z.overflowing_mul(y).0;
-                z = z.overflowing_add(y).0;
-                z %= y;
-                z >>= y;
+            };
+            assert_eq!(output.to_string(), expected_output.to_string());
+        }
+    }
+
+    #[test]
+    fn test_u1024() {
+        let input = quote! {
+            fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                let z = (x + y) * x;
                 z
             }
         };
         println!("[input ]: {}", input);
         let output = rvv_test(input).unwrap();
         println!("[otuput]: {}", output);
-        assert_eq!(output.to_string(), expected_output.to_string());
+
+        #[cfg(feature = "simulator")]
+        {
+            let expected_output = quote! {
+                fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                    let z = (x.overflowing_add(y).0).overflowing_mul(x).0;
+                    z
+                }
+            };
+            assert_eq!(output.to_string(), expected_output.to_string());
+        }
     }
 }
