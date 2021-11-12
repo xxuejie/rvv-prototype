@@ -155,6 +155,9 @@ impl CodegenContext {
                 (Some("U512"), Some("U512")) => {
                     bit_length = 512;
                 }
+                (Some("U1024"), Some("U1024")) => {
+                    bit_length = 1024;
+                }
                 _ => {
                     left.to_tokens(&mut tokens, self)?;
                     op.to_tokens(&mut tokens);
@@ -1499,30 +1502,58 @@ mod test {
                 z
             }
         };
-        let expected_output = quote! {
-            fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
-                let x_bytes = x.to_le_bytes();
-                let j = x.overflowing_add((z.overflowing_mul(y).0)).0;
-                if x > y && y == z {
-                    z = x & (z | y);
+        println!("[input ]: {}", input);
+        let output = rvv_test(input).unwrap();
+        println!("[otuput]: {}", output);
+
+        #[cfg(feature = "simulator")]
+        {
+            let expected_output = quote! {
+                fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
+                    let x_bytes = x.to_le_bytes();
+                    let j = x.overflowing_add((z.overflowing_mul(y).0)).0;
+                    if x > y && y == z {
+                        z = x & (z | y);
+                    }
+                    z = (x.overflowing_sub(y).0).overflowing_mul(x).0;
+                    let abc = 3456;
+                    z = (y
+                         .overflowing_add(j.overflowing_mul((y.overflowing_sub(x).0)).0)
+                         .0);
+                    z = z.overflowing_add(z).0;
+                    z = z.overflowing_sub(y).0;
+                    z = z.overflowing_mul(y).0;
+                    z = z.overflowing_add(y).0;
+                    z %= y;
+                    z >>= y;
+                    z
                 }
-                z = (x.overflowing_sub(y).0).overflowing_mul(x).0;
-                let abc = 3456;
-                z = (y
-                     .overflowing_add(j.overflowing_mul((y.overflowing_sub(x).0)).0)
-                     .0);
-                z = z.overflowing_add(z).0;
-                z = z.overflowing_sub(y).0;
-                z = z.overflowing_mul(y).0;
-                z = z.overflowing_add(y).0;
-                z %= y;
-                z >>= y;
+            };
+            assert_eq!(output.to_string(), expected_output.to_string());
+        }
+    }
+
+    #[test]
+    fn test_u1024() {
+        let input = quote! {
+            fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                let z = (x + y) * x;
                 z
             }
         };
         println!("[input ]: {}", input);
         let output = rvv_test(input).unwrap();
         println!("[otuput]: {}", output);
-        assert_eq!(output.to_string(), expected_output.to_string());
+
+        #[cfg(feature = "simulator")]
+        {
+            let expected_output = quote! {
+                fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                    let z = (x.overflowing_add(y).0).overflowing_mul(x).0;
+                    z
+                }
+            };
+            assert_eq!(output.to_string(), expected_output.to_string());
+        }
     }
 }
