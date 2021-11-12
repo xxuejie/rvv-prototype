@@ -123,9 +123,6 @@ impl CodegenContext {
             Bool,
             AssginOp,
         }
-        fn format_tmp_ident(id: usize) -> syn::Ident {
-            format_ident!("tmp_var{}", id)
-        }
 
         let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
@@ -226,6 +223,7 @@ impl CodegenContext {
                 ),
             ));
         }
+        // FIXME: handle OpCategory::Bool
         if let OpCategory::Binary = op_category {
             let dvreg = self.v_registers.next_register().unwrap();
             self.expr_regs.insert(expr.id, dvreg);
@@ -404,6 +402,9 @@ impl CodegenContext {
         self.expr_tokens.insert(expr.id, (tokens.clone(), bit_len1));
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
+            if let Some(dvreg) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, dvreg);
+            }
             let ts_inner = tokens.clone();
             let ts = quote! {
                 (#ts_inner)
@@ -422,6 +423,12 @@ impl CodegenContext {
         extra_bind_id: Option<usize>,
         mut bit_length: u16,
     ) -> Result<TokenStream, SpannedError> {
+        enum OpCategory {
+            Binary,
+            Bool,
+            AssginOp,
+        }
+
         let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
@@ -442,13 +449,16 @@ impl CodegenContext {
         if top_level {
             let left_type_name = left.type_name();
             let right_type_name = right.type_name();
-            let v_config = match (left_type_name.as_deref(), right_type_name.as_deref()) {
-                // vsetvli x0, t0, e256, m1, ta, ma
-                (Some("U256"), Some("U256")) => VConfig::Vsetvli {
-                    rd: XReg::Zero,
-                    rs1: XReg::T0,
-                    vtypei: Vtypei::new(256, Vlmul::M1, true, true),
-                },
+            match (left_type_name.as_deref(), right_type_name.as_deref()) {
+                (Some("U256"), Some("U256")) => {
+                    bit_length = 256;
+                }
+                (Some("U512"), Some("U512")) => {
+                    bit_length = 512;
+                }
+                (Some("U1024"), Some("U1024")) => {
+                    bit_length = 1024;
+                }
                 _ => {
                     left.to_tokens(&mut tokens, self)?;
                     op.to_tokens(&mut tokens);
@@ -456,27 +466,33 @@ impl CodegenContext {
                     return Ok(tokens);
                 }
             };
-            if self.v_config.as_ref() != Some(&v_config) {
-                self.v_config = Some(v_config);
-                let [b0, b1, b2, b3] = VInst::VConfig(v_config).encode_bytes();
-                if self.show_asm {
-                    // TODO: use to_string()
-                    let comment = format!("{:?}", v_config);
-                    tokens.extend(Some(quote! {
-                        let _ = concat!(#comment);
-                    }));
-                }
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            "li t0, 1",  // AVL = 1
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
+        }
+        // vsetvli x0, t0, e{256,512,1024}, m1, ta, ma
+        let v_config = VConfig::Vsetvli {
+            rd: XReg::Zero,
+            rs1: XReg::T0,
+            vtypei: Vtypei::new(bit_length, Vlmul::M1, true, true),
+        };
+        if self.v_config.as_ref() != Some(&v_config) {
+            self.v_config = Some(v_config);
+            let [b0, b1, b2, b3] = VInst::VConfig(v_config).encode_bytes();
+            if self.show_asm {
+                // TODO: use to_string()
+                let comment = format!("{:?}", v_config);
+                tokens.extend(Some(quote! {
+                    let _ = concat!(#comment);
+                }));
             }
+            let ts = quote! {
+                unsafe {
+                    asm!(
+                        "li t0, 1",  // AVL = 1
+                        ".byte {0}, {1}, {2}, {3}",
+                        const #b0, const #b1, const #b2, const #b3,
+                    )
+                }
+            };
+            tokens.extend(Some(ts));
         }
 
         for typed_expr in [left, right] {
@@ -494,7 +510,7 @@ impl CodegenContext {
                     };
                     let [b0, b1, b2, b3] = inst.encode_bytes();
                     if self.show_asm {
-                        // TODO: use to_string()
+                        // TODO: use VInst::to_string()
                         let comment = format!("{:?}", inst);
                         tokens.extend(Some(quote! {
                             let _ = concat!(#comment);
@@ -520,11 +536,6 @@ impl CodegenContext {
             }
         }
 
-        enum OpCategory {
-            Binary,
-            Bool,
-            AssginOp,
-        }
         let op_category = match op {
             syn::BinOp::Add(_)
             | syn::BinOp::Sub(_)
@@ -556,89 +567,46 @@ impl CodegenContext {
             | syn::BinOp::ShrEq(_) => OpCategory::AssginOp,
         };
 
-        match op {
+        let svreg1 = *self.expr_regs.get(&left.id).unwrap();
+        let svreg2 = *self.expr_regs.get(&right.id).unwrap();
+        let dvreg = match op_category {
+            OpCategory::Binary => {
+                let dvreg = self.v_registers.next_register().unwrap();
+                self.expr_regs.insert(expr.id, dvreg);
+                dvreg
+            }
+            OpCategory::Bool => {
+                unimplemented!();
+            }
+            OpCategory::AssginOp => svreg1,
+        };
+        let instructions = match op {
             // The `+` operator (addition)
             syn::BinOp::Add(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let svreg1 = self.expr_regs.get(&left.id).unwrap();
-                let svreg2 = self.expr_regs.get(&right.id).unwrap();
-                let inst = VInst::VaddVv(Ivv {
+                vec![VInst::VaddVv(Ivv {
                     vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(*svreg2),
-                    vs1: VReg::from_u8(*svreg1),
+                    vs2: VReg::from_u8(svreg2),
+                    vs1: VReg::from_u8(svreg1),
                     vm: false,
-                });
-                let [b0, b1, b2, b3] = inst.encode_bytes();
-                if self.show_asm {
-                    // TODO: use to_string()
-                    let comment = format!("{:?}", inst);
-                    tokens.extend(Some(quote! {
-                        let _ = concat!(#comment);
-                    }));
-                }
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-                self.expr_regs.insert(expr.id, dvreg);
+                })]
             }
             // The `-` operator (subtraction)
             syn::BinOp::Sub(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let svreg1 = self.expr_regs.get(&left.id).unwrap();
-                let svreg2 = self.expr_regs.get(&right.id).unwrap();
-                let [b0, b1, b2, b3] = VInst::VsubVv(Ivv {
+                vec![VInst::VsubVv(Ivv {
                     vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(*svreg2),
-                    vs1: VReg::from_u8(*svreg1),
+                    vs2: VReg::from_u8(svreg2),
+                    vs1: VReg::from_u8(svreg1),
                     vm: false,
-                })
-                .encode_bytes();
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-                self.expr_regs.insert(expr.id, dvreg);
+                })]
             }
             // The `*` operator (multiplication)
             syn::BinOp::Mul(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let svreg1 = self.expr_regs.get(&left.id).unwrap();
-                let svreg2 = self.expr_regs.get(&right.id).unwrap();
-                let inst = VInst::VmulVv(Ivv {
+                vec![VInst::VmulVv(Ivv {
                     vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(*svreg2),
-                    vs1: VReg::from_u8(*svreg1),
+                    vs2: VReg::from_u8(svreg2),
+                    vs1: VReg::from_u8(svreg1),
                     vm: false,
-                });
-                let [b0, b1, b2, b3] = inst.encode_bytes();
-                if self.show_asm {
-                    // TODO: use to_string()
-                    let comment = format!("{:?}", inst);
-                    tokens.extend(Some(quote! {
-                        let _ = concat!(#comment);
-                    }));
-                }
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-                self.expr_regs.insert(expr.id, dvreg);
+                })]
             }
             // The `/` operator (division)
             syn::BinOp::Div(_) => {
@@ -646,33 +614,12 @@ impl CodegenContext {
             }
             // The `%` operator (modulus)
             syn::BinOp::Rem(_) => {
-                let dvreg = self.v_registers.next_register().unwrap();
-                let svreg1 = self.expr_regs.get(&left.id).unwrap();
-                let svreg2 = self.expr_regs.get(&right.id).unwrap();
-                let inst = VInst::VremuVv(Ivv {
+                vec![VInst::VremuVv(Ivv {
                     vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(*svreg2),
-                    vs1: VReg::from_u8(*svreg1),
+                    vs2: VReg::from_u8(svreg2),
+                    vs1: VReg::from_u8(svreg1),
                     vm: false,
-                });
-                let [b0, b1, b2, b3] = inst.encode_bytes();
-                if self.show_asm {
-                    // TODO: use to_string()
-                    let comment = format!("{:?}", inst);
-                    tokens.extend(Some(quote! {
-                        let _ = concat!(#comment);
-                    }));
-                }
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-                self.expr_regs.insert(expr.id, dvreg);
+                })]
             }
 
             // The `&&` operator (logical and)
@@ -729,72 +676,30 @@ impl CodegenContext {
             }
             // The `+=` operator
             syn::BinOp::AddEq(_) => {
-                let svreg1 = self.expr_regs.get(&left.id).unwrap();
-                let svreg2 = self.expr_regs.get(&right.id).unwrap();
-                let dvreg = *svreg1;
-                let [b0, b1, b2, b3] = VInst::VaddVv(Ivv {
+                vec![VInst::VaddVv(Ivv {
                     vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(*svreg2),
-                    vs1: VReg::from_u8(*svreg1),
+                    vs2: VReg::from_u8(svreg2),
+                    vs1: VReg::from_u8(svreg1),
                     vm: false,
-                })
-                .encode_bytes();
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-                self.expr_regs.insert(expr.id, dvreg);
+                })]
             }
             // The `-=` operator
             syn::BinOp::SubEq(_) => {
-                let svreg1 = self.expr_regs.get(&left.id).unwrap();
-                let svreg2 = self.expr_regs.get(&right.id).unwrap();
-                let dvreg = *svreg1;
-                let [b0, b1, b2, b3] = VInst::VsubVv(Ivv {
+                vec![VInst::VsubVv(Ivv {
                     vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(*svreg2),
-                    vs1: VReg::from_u8(*svreg1),
+                    vs2: VReg::from_u8(svreg2),
+                    vs1: VReg::from_u8(svreg1),
                     vm: false,
-                })
-                .encode_bytes();
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-                self.expr_regs.insert(expr.id, dvreg);
+                })]
             }
             // The `*=` operator
             syn::BinOp::MulEq(_) => {
-                let svreg1 = self.expr_regs.get(&left.id).unwrap();
-                let svreg2 = self.expr_regs.get(&right.id).unwrap();
-                let dvreg = *svreg1;
-                let [b0, b1, b2, b3] = VInst::VmulVv(Ivv {
+                vec![VInst::VmulVv(Ivv {
                     vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(*svreg2),
-                    vs1: VReg::from_u8(*svreg1),
+                    vs2: VReg::from_u8(svreg2),
+                    vs1: VReg::from_u8(svreg1),
                     vm: false,
-                })
-                .encode_bytes();
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-                self.expr_regs.insert(expr.id, dvreg);
+                })]
             }
             // The `/=` operator
             syn::BinOp::DivEq(_) => {
@@ -802,26 +707,12 @@ impl CodegenContext {
             }
             // The `%=` operator
             syn::BinOp::RemEq(_) => {
-                let svreg1 = self.expr_regs.get(&left.id).unwrap();
-                let svreg2 = self.expr_regs.get(&right.id).unwrap();
-                let dvreg = *svreg1;
-                let [b0, b1, b2, b3] = VInst::VremuVv(Ivv {
+                vec![VInst::VremuVv(Ivv {
                     vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(*svreg2),
-                    vs1: VReg::from_u8(*svreg1),
+                    vs2: VReg::from_u8(svreg2),
+                    vs1: VReg::from_u8(svreg1),
                     vm: false,
-                })
-                .encode_bytes();
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-                self.expr_regs.insert(expr.id, dvreg);
+                })]
             }
             // The `^=` operator
             syn::BinOp::BitXorEq(_) => {
@@ -843,7 +734,27 @@ impl CodegenContext {
             syn::BinOp::ShrEq(_) => {
                 unimplemented!()
             }
+        };
+        for inst in instructions {
+            let [b0, b1, b2, b3] = inst.encode_bytes();
+            if self.show_asm {
+                // TODO: use to_string()
+                let comment = format!("{:?}", inst);
+                tokens.extend(Some(quote! {
+                    let _ = concat!(#comment);
+                }));
+            }
+            let ts = quote! {
+                unsafe {
+                    asm!(
+                        ".byte {0}, {1}, {2}, {3}",
+                        const #b0, const #b1, const #b2, const #b3,
+                    )
+                }
+            };
+            tokens.extend(Some(ts));
         }
+
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
             if let Some(dvreg) = self.expr_regs.get(&expr.id).cloned() {
@@ -851,11 +762,12 @@ impl CodegenContext {
             }
         }
 
+        // FIXME: handle OpCategory::Bool
         if top_level && !is_assign {
-            let vreg = self.expr_regs.get(&expr.id).unwrap();
+            let vreg = *self.expr_regs.get(&expr.id).unwrap();
             let inst = VInst::VseV {
-                width: 256,
-                vs3: VReg::from_u8(*vreg),
+                width: bit_length,
+                vs3: VReg::from_u8(vreg),
                 rs1: XReg::T0,
                 vm: false,
             };
@@ -872,13 +784,13 @@ impl CodegenContext {
                 unsafe {
                     asm!(
                         "mv t0, {0}",
-                        // This should be vse256
+                        // This should be vse{256, 512, 1024}
                         ".byte {1}, {2}, {3}, {4}",
                         in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
                         const #b0, const #b1, const #b2, const #b3,
                     )
                 };
-                U256::from_le_bytes(&tmp_rvv_vector_buf)
+                U256::from_little_endian(&tmp_rvv_vector_buf[..])
             }));
             let mut rv = TokenStream::new();
             token::Brace::default().surround(&mut rv, |inner| {
@@ -1409,7 +1321,7 @@ mod test {
     use super::*;
     use crate::type_checker::{CheckerContext, TypeChecker};
 
-    fn rvv_test(item: TokenStream) -> Result<TokenStream, SpannedError> {
+    fn rvv_test(item: TokenStream, show_asm: bool) -> Result<TokenStream, SpannedError> {
         let input: syn::ItemFn = syn::parse2(item).unwrap();
         let mut out = ItemFn::try_from(&input)?;
         let mut checker_context = CheckerContext::default();
@@ -1433,7 +1345,6 @@ mod test {
         }
         println!("<< type checked >>");
 
-        let show_asm = true;
         let mut tokens = TokenStream::new();
         let mut codegen_context = CodegenContext::new(checker_context.variables, show_asm);
         out.to_tokens(&mut tokens, &mut codegen_context)?;
@@ -1475,7 +1386,7 @@ mod test {
         };
         let input_string = input.to_string();
         println!("[input ]: {}", input_string);
-        let output = rvv_test(input).unwrap();
+        let output = rvv_test(input, false).unwrap();
         let output_string = output.to_string();
         println!("[otuput]: {}", output_string);
         assert_eq!(input_string, output_string);
@@ -1503,7 +1414,7 @@ mod test {
             }
         };
         println!("[input ]: {}", input);
-        let output = rvv_test(input).unwrap();
+        let output = rvv_test(input, false).unwrap();
         println!("[otuput]: {}", output);
 
         #[cfg(feature = "simulator")]
@@ -1542,7 +1453,7 @@ mod test {
             }
         };
         println!("[input ]: {}", input);
-        let output = rvv_test(input).unwrap();
+        let output = rvv_test(input, false).unwrap();
         println!("[otuput]: {}", output);
 
         #[cfg(feature = "simulator")]
@@ -1550,6 +1461,37 @@ mod test {
             let expected_output = quote! {
                 fn comp_u1024(x: U1024, y: U1024) -> U1024 {
                     let z = (x.overflowing_add(y).0).overflowing_mul(x).0;
+                    z
+                }
+            };
+            assert_eq!(output.to_string(), expected_output.to_string());
+        }
+        #[cfg(not(feature = "simulator"))]
+        {
+            let expected_output = quote! {
+                fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                    let z = {
+                        unsafe {
+                            asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
+                        }
+                        unsafe {
+                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 208u8, const 2u8, const 16u8 ,)
+                        }
+                        unsafe {
+                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 135u8, const 208u8, const 2u8, const 16u8 ,)
+                        }
+                        unsafe {
+                            asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 1u8, const 16u8, const 0u8 ,)
+                        }
+                        unsafe {
+                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 1u8, const 1u8, const 148u8 ,)
+                        }
+                        let mut tmp_rvv_vector_buf = [0u8; 32];
+                        unsafe {
+                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 241u8, const 2u8, const 16u8 ,)
+                        };
+                        U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                    };
                     z
                 }
             };
