@@ -230,7 +230,7 @@ pub struct Ivi {
 
 // Vector Arithmetic Instruction
 fn encode_vai(dst: u8, funct3: u8, src1: u8, src2: u8, vm: bool, funct6: u8) -> u32 {
-    let mut value = OP_V;
+    let mut value = op::V;
     value = set_bits(value, OFFSET_DST, dst as u32);
     value = set_bits(value, OFFSET_FUNCT3, funct3 as u32);
     value = set_bits(value, OFFSET_SRC1, src1 as u32);
@@ -246,7 +246,7 @@ impl Ivv {
     fn encode_u32(&self, funct6: u8) -> u32 {
         encode_vai(
             self.vd as u8,
-            FUNCT3_OPIVV,
+            funct3::OPIVV,
             self.vs1 as u8,
             self.vs2 as u8,
             self.vm,
@@ -258,7 +258,7 @@ impl Ivx {
     fn encode_u32(&self, funct6: u8) -> u32 {
         encode_vai(
             self.vd as u8,
-            FUNCT3_OPIVX,
+            funct3::OPIVX,
             self.rs1 as u8,
             self.vs2 as u8,
             self.vm,
@@ -270,7 +270,7 @@ impl Ivi {
     fn encode_u32(&self, funct6: u8) -> u32 {
         encode_vai(
             self.vd as u8,
-            FUNCT3_OPIVI,
+            funct3::OPIVI,
             self.imm.0,
             self.vs2 as u8,
             self.vm,
@@ -347,72 +347,86 @@ pub enum VInst {
     /// TODO: vrem.vv vd, vs2, vs1, vm   # Vector-vector
     /// TODO: vrem.vx vd, vs2, rs1, vm   # vector-scalar
 
-    // // ==== Vector Single-Width Bit Shift Instructions ====
-    // // # Bit shift operations
-    // /// vsll.vv vd, vs2, vs1, vm   # Vector-vector
-    // VsllVv(Ivv),
-    // /// vsll.vx vd, vs2, rs1, vm   # vector-scalar
-    // VsllVv(Ivx),
-    // /// vsll.vi vd, vs2, uimm, vm   # vector-immediate
-    // VsllVv(Ivi),
+    // ==== Vector Single-Width Bit Shift Instructions ====
+    // # Bit shift operations
+    /// vsll.vv vd, vs2, vs1, vm   # Vector-vector
+    VsllVv(Ivv),
+    /// vsll.vx vd, vs2, rs1, vm   # vector-scalar
+    VsllVx(Ivx),
+    /// vsll.vi vd, vs2, uimm, vm   # vector-immediate
+    VsllVi(Ivi),
 
-    // /// vsrl.vv vd, vs2, vs1, vm   # Vector-vector
-    // VsrlVv(Ivv),
-    // /// vsrl.vx vd, vs2, rs1, vm   # vector-scalar
-    // VsrlVx(Ivx),
-    // /// vsrl.vi vd, vs2, uimm, vm   # vector-immediate
-    // VsrlVi(Ivi),
+    /// vsrl.vv vd, vs2, vs1, vm   # Vector-vector
+    VsrlVv(Ivv),
+    /// vsrl.vx vd, vs2, rs1, vm   # vector-scalar
+    VsrlVx(Ivx),
+    /// vsrl.vi vd, vs2, uimm, vm   # vector-immediate
+    VsrlVi(Ivi),
 
-    // // ==== Vector Bitwise Logical Instructions ====
-    // /// vand.vv vd, vs2, vs1, vm   # Vector-vector
-    // VandVv(Ivv),
-    // /// vand.vx vd, vs2, rs1, vm   # vector-scalar
-    // VandVx(Ivx),
-    // /// vand.vi vd, vs2, imm, vm   # vector-immediate
-    // VandVi(Ivi),
+    // ==== Vector Bitwise Logical Instructions ====
+    /// vand.vv vd, vs2, vs1, vm   # Vector-vector
+    VandVv(Ivv),
+    /// vand.vx vd, vs2, rs1, vm   # vector-scalar
+    VandVx(Ivx),
+    /// vand.vi vd, vs2, imm, vm   # vector-immediate
+    VandVi(Ivi),
 
-    // /// vor.vv vd, vs2, vs1, vm    # Vector-vector
-    // VorVv(Ivv),
-    // /// vor.vx vd, vs2, rs1, vm    # vector-scalar
-    // VorVx(Ivx),
-    // /// vor.vi vd, vs2, imm, vm    # vector-immediate
-    // VorVi(Ivi),
+    /// vor.vv vd, vs2, vs1, vm    # Vector-vector
+    VorVv(Ivv),
+    /// vor.vx vd, vs2, rs1, vm    # vector-scalar
+    VorVx(Ivx),
+    /// vor.vi vd, vs2, imm, vm    # vector-immediate
+    VorVi(Ivi),
 
-    // /// vxor.vv vd, vs2, vs1, vm    # Vector-vector
-    // VxorVv(Ivv),
-    // /// vxor.vx vd, vs2, rs1, vm    # vector-scalar
-    // VxorVx(Ivx),
-    // /// vxor.vi vd, vs2, imm, vm    # vector-immediate
-    // VxorVi(Ivi),
+    /// vxor.vv vd, vs2, vs1, vm    # Vector-vector
+    VxorVv(Ivv),
+    /// vxor.vx vd, vs2, rs1, vm    # vector-scalar
+    VxorVx(Ivx),
+    /// vxor.vi vd, vs2, imm, vm    # vector-immediate
+    VxorVi(Ivi),
 
     // ==== Vector Integer Comparison Instructions ====
     // `==` # Set if equal
     /// vmseq.vv vd, vs2, vs1, vm  # Vector-vector
+    VmseqVv(Ivv),
     /// vmseq.vx vd, vs2, rs1, vm  # vector-scalar
+    VmseqVx(Ivx),
     /// vmseq.vi vd, vs2, imm, vm  # vector-immediate
+    VmseqVi(Ivi),
 
     // `!=` # Set if not equal
     /// vmsne.vv vd, vs2, vs1, vm  # Vector-vector
+    VmsneVv(Ivv),
     /// vmsne.vx vd, vs2, rs1, vm  # vector-scalar
+    VmsneVx(Ivx),
     /// vmsne.vi vd, vs2, imm, vm  # vector-immediate
+    VmsneVi(Ivi),
 
     // `<` # Set if less than, unsigned
     /// vmsltu.vv vd, vs2, vs1, vm  # Vector-vector
+    VmsltuVv(Ivv),
     /// vmsltu.vx vd, vs2, rs1, vm  # Vector-scalar
+    VmsltuVx(Ivx),
 
     // `<=` # Set if less than or equal, unsigned
     /// vmsleu.vv vd, vs2, vs1, vm   # Vector-vector
+    VmsleuVv(Ivv),
     /// vmsleu.vx vd, vs2, rs1, vm   # vector-scalar
+    VmsleuVx(Ivx),
     /// vmsleu.vi vd, vs2, imm, vm   # Vector-immediate
+    VmsleuVi(Ivi),
 
     // `>` # Set if greater than, unsigned
     /// vmsgtu.vx vd, vs2, rs1, vm   # Vector-scalar
+    VmsgtuVx(Ivx),
     /// vmsgtu.vi vd, vs2, imm, vm   # Vector-immediate
+    VmsgtuVi(Ivi),
 
     // # Following two instructions are not provided directly
     // # Set if greater than or equal, unsigned
     // # vmsgeu.vx vd, vs2, rs1, vm    # Vector-scalar
     // va >= vb        vmsle{u}.vv vd, vb, va, vm    vmsge{u}.vv vd, va, vb, vm
+    VmsgeuVv(Ivv),
 
     /// Vector unit-stride loads
     /// vle{64, 256, 1024}.v vd, (rs1), vm
@@ -432,14 +446,6 @@ pub enum VInst {
     },
 }
 
-const FUNCT3_OPIVV: u8 = 0b000;
-const FUNCT3_OPFVV: u8 = 0b001;
-const FUNCT3_OPMVV: u8 = 0b010;
-const FUNCT3_OPIVI: u8 = 0b011;
-const FUNCT3_OPIVX: u8 = 0b100;
-const FUNCT3_OPFVF: u8 = 0b101;
-const FUNCT3_OPMVX: u8 = 0b110;
-const FUNCT3_OPCFG: u8 = 0b111;
 const MOP_UNIT_STRIDE: u8 = 0b00;
 const OFFSET_DST: usize = 7;
 const OFFSET_FUNCT3: usize = OFFSET_DST + 5;
@@ -449,69 +455,200 @@ const OFFSET_REST: usize = OFFSET_SRC2;
 const OFFSET_VM: usize = OFFSET_SRC2 + 5;
 const OFFSET_FUNCT6: usize = OFFSET_VM + 1;
 
-const OP_V: u32 = 0b1010111;
-const OP_LOAD_FP: u32 = 0b0000111;
-const OP_STORE_FP: u32 = 0b0100111;
+mod op {
+    pub(crate) const V: u32 = 0b1010111;
+    pub(crate) const LOAD_FP: u32 = 0b0000111;
+    pub(crate) const STORE_FP: u32 = 0b0100111;
+}
 
-const FUNCT6_VADD: u8 = 0b0;
-const FUNCT6_VSUB: u8 = 0b000010;
-const FUNCT6_VRSUB: u8 = 0b000011;
-const FUNCT6_VMUL: u8 = 0b100101;
-const FUNCT6_VREMU: u8 = 0b100010;
-const FUNCT6_VREM: u8 = 0b100011;
+mod funct3 {
+    // See: https://github.com/riscv/riscv-v-spec/blob/master/v-spec.adoc#sec-arithmetic-encoding
+    pub(crate) const OPIVV: u8 = 0b000;
+    pub(crate) const OPFVV: u8 = 0b001;
+    pub(crate) const OPMVV: u8 = 0b010;
+    pub(crate) const OPIVI: u8 = 0b011;
+    pub(crate) const OPIVX: u8 = 0b100;
+    pub(crate) const OPFVF: u8 = 0b101;
+    pub(crate) const OPMVX: u8 = 0b110;
+    pub(crate) const OPCFG: u8 = 0b111;
+}
+
+mod funct6 {
+    // See: https://github.com/riscv/riscv-v-spec/blob/master/inst-table.adoc
+    pub(crate) const VADD: u8 = 0b000000;
+    pub(crate) const VSUB: u8 = 0b000010;
+    pub(crate) const VRSUB: u8 = 0b000011;
+    pub(crate) const VMUL: u8 = 0b100101;
+    pub(crate) const VDIVU: u8 = 0b100000;
+    pub(crate) const VDIV: u8 = 0b100001;
+    pub(crate) const VREMU: u8 = 0b100010;
+    pub(crate) const VREM: u8 = 0b100011;
+    pub(crate) const VSLL: u8 = 0b100101;
+    pub(crate) const VSRL: u8 = 0b101000;
+    pub(crate) const VAND: u8 = 0b001001;
+    pub(crate) const VOR: u8 = 0b001010;
+    pub(crate) const VXOR: u8 = 0b001011;
+    pub(crate) const VMSEQ: u8 = 0b011000;
+    pub(crate) const VMSNE: u8 = 0b011001;
+    pub(crate) const VMSLTU: u8 = 0b011010;
+    pub(crate) const VMSLEU: u8 = 0b011100;
+    pub(crate) const VMSGTU: u8 = 0b011110;
+}
 
 impl VInst {
     pub fn encode_u32(self) -> u32 {
         let (base, rest, src1, funct3, dst) = match self {
+            // ==== Vector Integer Arithmetic Instructions ====
             VInst::VaddVv(ivv) => {
-                return ivv.encode_u32(FUNCT6_VADD);
+                return ivv.encode_u32(funct6::VADD);
             }
             VInst::VaddVx(ivx) => {
-                return ivx.encode_u32(FUNCT6_VADD);
+                return ivx.encode_u32(funct6::VADD);
             }
             VInst::VaddVi(ivi) => {
-                return ivi.encode_u32(FUNCT6_VADD);
+                return ivi.encode_u32(funct6::VADD);
             }
             VInst::VsubVv(ivv) => {
-                return ivv.encode_u32(FUNCT6_VSUB);
+                return ivv.encode_u32(funct6::VSUB);
             }
             VInst::VsubVx(ivx) => {
-                return ivx.encode_u32(FUNCT6_VSUB);
+                return ivx.encode_u32(funct6::VSUB);
             }
             VInst::VrsubVx(ivx) => {
-                return ivx.encode_u32(FUNCT6_VRSUB);
+                return ivx.encode_u32(funct6::VRSUB);
             }
             VInst::VrsubVi(ivi) => {
-                return ivi.encode_u32(FUNCT6_VRSUB);
+                return ivi.encode_u32(funct6::VRSUB);
             }
             VInst::VmulVv(ivv) => {
-                return ivv.encode_u32(FUNCT6_VMUL);
+                return ivv.encode_u32(funct6::VMUL);
             }
             VInst::VmulVx(ivx) => {
-                return ivx.encode_u32(FUNCT6_VMUL);
+                return ivx.encode_u32(funct6::VMUL);
             }
             VInst::VremuVv(ivv) => {
-                return ivv.encode_u32(FUNCT6_VREMU);
+                return ivv.encode_u32(funct6::VREMU);
             }
             VInst::VremuVx(ivx) => {
-                return ivx.encode_u32(FUNCT6_VREMU);
+                return ivx.encode_u32(funct6::VREMU);
             }
+
+            // ==== Vector Single-Width Bit Shift Instructions ====
+            VInst::VsllVv(ivv) => {
+                return ivv.encode_u32(funct6::VSLL);
+            }
+            VInst::VsllVx(ivx) => {
+                return ivx.encode_u32(funct6::VSLL);
+            }
+            VInst::VsllVi(ivi) => {
+                return ivi.encode_u32(funct6::VSLL);
+            }
+            VInst::VsrlVv(ivv) => {
+                return ivv.encode_u32(funct6::VSRL);
+            }
+            VInst::VsrlVx(ivx) => {
+                return ivx.encode_u32(funct6::VSRL);
+            }
+            VInst::VsrlVi(ivi) => {
+                return ivi.encode_u32(funct6::VSRL);
+            }
+
+            // ==== Vector Bitwise Logical Instructions ====
+            VInst::VandVv(ivv) => {
+                return ivv.encode_u32(funct6::VAND);
+            }
+            VInst::VandVx(ivx) => {
+                return ivx.encode_u32(funct6::VAND);
+            }
+            VInst::VandVi(ivi) => {
+                return ivi.encode_u32(funct6::VAND);
+            }
+            VInst::VorVv(ivv) => {
+                return ivv.encode_u32(funct6::VOR);
+            }
+            VInst::VorVx(ivx) => {
+                return ivx.encode_u32(funct6::VOR);
+            }
+            VInst::VorVi(ivi) => {
+                return ivi.encode_u32(funct6::VOR);
+            }
+            VInst::VxorVv(ivv) => {
+                return ivv.encode_u32(funct6::VXOR);
+            }
+            VInst::VxorVx(ivx) => {
+                return ivx.encode_u32(funct6::VXOR);
+            }
+            VInst::VxorVi(ivi) => {
+                return ivi.encode_u32(funct6::VXOR);
+            }
+
+            // ==== Vector Integer Comparison Instructions ====
+            VInst::VmseqVv(ivv) => {
+                return ivv.encode_u32(funct6::VMSEQ);
+            }
+            VInst::VmseqVx(ivx) => {
+                return ivx.encode_u32(funct6::VMSEQ);
+            }
+            VInst::VmseqVi(ivi) => {
+                return ivi.encode_u32(funct6::VMSEQ);
+            }
+            VInst::VmsneVv(ivv) => {
+                return ivv.encode_u32(funct6::VMSNE);
+            }
+            VInst::VmsneVx(ivx) => {
+                return ivx.encode_u32(funct6::VMSNE);
+            }
+            VInst::VmsneVi(ivi) => {
+                return ivi.encode_u32(funct6::VMSNE);
+            }
+            VInst::VmsltuVv(ivv) => {
+                return ivv.encode_u32(funct6::VMSLTU);
+            }
+            VInst::VmsltuVx(ivx) => {
+                return ivx.encode_u32(funct6::VMSLTU);
+            }
+            VInst::VmsleuVv(ivv) => {
+                return ivv.encode_u32(funct6::VMSLEU);
+            }
+            VInst::VmsleuVx(ivx) => {
+                return ivx.encode_u32(funct6::VMSLEU);
+            }
+            VInst::VmsleuVi(ivi) => {
+                return ivi.encode_u32(funct6::VMSLEU);
+            }
+            VInst::VmsgtuVx(ivx) => {
+                return ivx.encode_u32(funct6::VMSGTU);
+            }
+            VInst::VmsgtuVi(ivi) => {
+                return ivi.encode_u32(funct6::VMSGTU);
+            }
+            VInst::VmsgeuVv(Ivv { vd, vs2, vs1, vm }) => {
+                return VInst::VmsleuVv(Ivv {
+                    vd,
+                    vm,
+                    vs2: vs1,
+                    vs1: vs2,
+                })
+                .encode_u32();
+            }
+
+            // ==== other instructions ====
             VInst::VConfig(cfg) => match cfg {
                 VConfig::Vsetvli { rd, rs1, vtypei } => {
-                    let funct3: u8 = FUNCT3_OPCFG;
+                    let funct3: u8 = funct3::OPCFG;
                     let rest: u32 = vtypei.0 as u32;
-                    (OP_V, rest, rs1 as u8, funct3, rd as u8)
+                    (op::V, rest, rs1 as u8, funct3, rd as u8)
                 }
                 VConfig::Vsetivli { rd, uimm, vtypei } => {
-                    let funct3: u8 = FUNCT3_OPCFG;
+                    let funct3: u8 = funct3::OPCFG;
                     let mut rest: u32 = vtypei.0 as u32;
                     rest = set_bits(rest, 10, 0b11);
-                    (OP_V, rest, uimm.0, funct3, rd as u8)
+                    (op::V, rest, uimm.0, funct3, rd as u8)
                 }
                 VConfig::Vsetvl { rd, rs1, rs2 } => {
-                    let funct3: u8 = FUNCT3_OPCFG;
+                    let funct3: u8 = funct3::OPCFG;
                     let rest: u32 = set_bits(rs2 as u8 as u32, 5 + 6, 1);
-                    (OP_V, rest, rs1 as u8, funct3, rd as u8)
+                    (op::V, rest, rs1 as u8, funct3, rd as u8)
                 }
             },
             VInst::VleV { width, vd, rs1, vm } => {
@@ -525,7 +662,7 @@ impl VInst {
                 if mew {
                     rest = set_bits(rest, 5 + 1 + 2, 1);
                 }
-                (OP_LOAD_FP, rest, rs1 as u8, funct3, vd as u8)
+                (op::LOAD_FP, rest, rs1 as u8, funct3, vd as u8)
             }
             VInst::VseV {
                 width,
@@ -543,7 +680,7 @@ impl VInst {
                 if mew {
                     rest = set_bits(rest, 5 + 1 + 2, 1);
                 }
-                (OP_STORE_FP, rest, rs1 as u8, funct3, vs3 as u8)
+                (op::STORE_FP, rest, rs1 as u8, funct3, vs3 as u8)
             }
         };
         let mut value = base;

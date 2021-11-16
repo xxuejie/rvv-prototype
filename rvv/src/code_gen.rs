@@ -226,6 +226,12 @@ impl CodegenContext {
             })?;
             self.expr_regs.insert(expr.id, dvreg);
         }
+
+        // FIXME:
+        //   * div zero is allowed
+        //   * shift more than bit length is allowed
+        //   * TODO: find more special behaviors
+        // See: https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/insns/v{op}_{v,vv,vx,vi,vm,vf,..}.h
         let ts = match op {
             // The `+` operator (addition)
             syn::BinOp::Add(_) => {
