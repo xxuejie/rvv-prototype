@@ -213,7 +213,10 @@ impl TypeChecker for TypedExpression {
                 match (&mut left.ty, &mut right.ty) {
                     (Some(left_ty), Some(right_ty)) => {
                         if left_ty.0 != right_ty.0 {
-                            return Err((self.expr.1, anyhow!("Assign/AssignOp with different types is not supported in rvv_vector")));
+                            return Err((self.expr.1, anyhow!("Assign/AssignOp with different types is not supported in rvv_vector. left={}, right={}",
+                                                             left_ty.0.type_name().unwrap_or_else(|| "unknown".to_string()),
+                                                             right_ty.0.type_name().unwrap_or_else(|| "unknown".to_string())
+                            )));
                         }
                     }
                     (None, Some(_)) => {
@@ -243,7 +246,9 @@ impl TypeChecker for TypedExpression {
                             return Err((
                                 self.expr.1,
                                 anyhow!(
-                                    "Binary op with different types is not supported in rvv_vector"
+                                    "Binary op with different types is not supported in rvv_vector. left={}, right={}",
+                                    left_ty.0.type_name().unwrap_or_else(|| "unknown".to_string()),
+                                    right_ty.0.type_name().unwrap_or_else(|| "unknown".to_string())
                                 ),
                             ));
                         }
@@ -310,9 +315,10 @@ impl TypeChecker for TypedExpression {
                             if left_ty.0 != right_ty.0 {
                                 return Err((
                                     self.expr.1,
-                                    anyhow!(
-                                    "different if else branch types is not supported in rvv_vector"
-                                ),
+                                    anyhow!("different if else branch types is not supported in rvv_vector. then-branch={}, else-branch={}",
+                                            left_ty.0.type_name().unwrap_or_else(|| "unknown".to_string()),
+                                            right_ty.0.type_name().unwrap_or_else(|| "unknown".to_string())
+                                    ),
                                 ));
                             }
                             Some(left_ty.clone())

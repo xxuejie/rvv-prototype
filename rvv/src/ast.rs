@@ -229,7 +229,15 @@ impl Type {
         }
     }
     pub fn type_name(&self) -> Option<String> {
-        self.type_ident().map(|ident| ident.to_string())
+        self.type_ident()
+            .map(|ident| ident.to_string())
+            .map(|name| {
+                if self.is_ref() {
+                    format!("&{}", name)
+                } else {
+                    name
+                }
+            })
     }
 
     pub fn unit() -> Type {
