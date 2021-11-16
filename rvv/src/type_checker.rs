@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, bail, Error};
+use anyhow::anyhow;
 
 use crate::ast::{
     BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Span, Statement,
@@ -48,7 +48,7 @@ impl TypeChecker for ReturnType {
 }
 
 impl TypeChecker for BareFnArg {
-    fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
+    fn check_types(&mut self, _context: &mut CheckerContext) -> Result<(), SpannedError> {
         Ok(())
     }
 }
@@ -66,12 +66,7 @@ impl TypeChecker for Type {
                 output.0.check_types(context)?;
             }
             Type::Path(_path) => {}
-            Type::Reference {
-                lifetime,
-                mutability,
-                elem,
-                ..
-            } => {
+            Type::Reference { elem, .. } => {
                 elem.0.check_types(context)?;
             }
             Type::Slice { elem, .. } => {
@@ -89,12 +84,12 @@ impl TypeChecker for Type {
 impl TypeChecker for Pattern {
     fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         match self {
-            Pattern::Ident { mutability, ident } => {}
+            Pattern::Ident { .. } => {}
             Pattern::Type { pat, ty, .. } => {
                 pat.0.check_types(context)?;
                 ty.0.check_types(context)?;
             }
-            Pattern::Range { lo, limits, hi } => {
+            Pattern::Range { lo, hi, .. } => {
                 lo.check_types(context)?;
                 hi.check_types(context)?;
             }
@@ -107,16 +102,16 @@ impl TypeChecker for Pattern {
 impl TypeChecker for Expression {
     fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         match self {
-            Expression::Array(arr) => {}
+            Expression::Array(_) => {}
             Expression::Assign { left, right, .. } => {
                 left.check_types(context)?;
                 right.check_types(context)?;
             }
-            Expression::AssignOp { left, op, right } => {
+            Expression::AssignOp { left, right, .. } => {
                 left.check_types(context)?;
                 right.check_types(context)?;
             }
-            Expression::Binary { left, op, right } => {
+            Expression::Binary { left, right, .. } => {
                 left.check_types(context)?;
                 right.check_types(context)?;
             }
@@ -126,57 +121,35 @@ impl TypeChecker for Expression {
                     arg.check_types(context)?;
                 }
             }
-            Expression::MethodCall {
-                receiver,
-                method,
-                args,
-                ..
-            } => {
+            Expression::MethodCall { receiver, args, .. } => {
                 receiver.check_types(context)?;
                 for arg in args {
                     arg.check_types(context)?;
                 }
             }
-            Expression::Macro(mac) => {}
-            Expression::Unary { op, expr } => {
+            Expression::Macro(_) => {}
+            Expression::Unary { expr, .. } => {
                 expr.check_types(context)?;
             }
-            Expression::Field {
-                base,
-                dot_token,
-                member,
-            } => {
+            Expression::Field { base, .. } => {
                 base.check_types(context)?;
             }
-            Expression::Cast { expr, as_token, ty } => {
+            Expression::Cast { expr, ty, .. } => {
                 expr.check_types(context)?;
                 ty.0.check_types(context)?;
             }
-            Expression::Repeat {
-                bracket_token,
-                expr,
-                semi_token,
-                len,
-            } => {
+            Expression::Repeat { expr, len, .. } => {
                 expr.check_types(context)?;
                 len.check_types(context)?;
             }
-            Expression::Lit(lit) => {}
-            Expression::Paren { paren_token, expr } => {
+            Expression::Lit(_) => {}
+            Expression::Paren { expr, .. } => {
                 expr.check_types(context)?;
             }
-            Expression::Reference {
-                and_token,
-                mutability,
-                expr,
-            } => {
+            Expression::Reference { expr, .. } => {
                 expr.check_types(context)?;
             }
-            Expression::Index {
-                expr,
-                bracket_token,
-                index,
-            } => {
+            Expression::Index { expr, index, .. } => {
                 expr.check_types(context)?;
                 index.check_types(context)?;
             }
@@ -192,10 +165,10 @@ impl TypeChecker for Expression {
                 block.check_types(context)?;
             }
             Expression::If {
-                if_token,
                 cond,
                 then_branch,
                 else_branch,
+                ..
             } => {
                 cond.check_types(context)?;
                 then_branch.check_types(context)?;
@@ -203,7 +176,7 @@ impl TypeChecker for Expression {
                     expr.check_types(context)?;
                 }
             }
-            Expression::Range { from, limits, to } => {
+            Expression::Range { from, to, .. } => {
                 if let Some(expr) = from.as_mut() {
                     expr.check_types(context)?;
                 }
@@ -215,11 +188,7 @@ impl TypeChecker for Expression {
                 body.check_types(context)?;
             }
             Expression::ForLoop {
-                for_token,
-                pat,
-                in_token,
-                expr,
-                body,
+                pat, expr, body, ..
             } => {
                 pat.0.check_types(context)?;
                 expr.check_types(context)?;
@@ -247,10 +216,10 @@ impl TypeChecker for TypedExpression {
                             return Err((self.expr.1, anyhow!("Assign/AssignOp with different types is not supported in rvv_vector")));
                         }
                     }
-                    (None, Some(right_ty)) => {
+                    (None, Some(_)) => {
                         left.ty = right.ty.clone();
                     }
-                    (Some(left_ty), None) => {
+                    (Some(_), None) => {
                         right.ty = left.ty.clone();
                     }
                     (None, None) => {}
@@ -258,15 +227,15 @@ impl TypeChecker for TypedExpression {
                 Some(Box::new((Type::unit(), Span::default())))
             }
             Expression::Binary { left, op, right } => {
-                let bool_op = match op {
+                let bool_op = matches!(
+                    op,
                     syn::BinOp::Eq(_)
-                    | syn::BinOp::Lt(_)
-                    | syn::BinOp::Le(_)
-                    | syn::BinOp::Ne(_)
-                    | syn::BinOp::Ge(_)
-                    | syn::BinOp::Gt(_) => true,
-                    _ => false,
-                };
+                        | syn::BinOp::Lt(_)
+                        | syn::BinOp::Le(_)
+                        | syn::BinOp::Ne(_)
+                        | syn::BinOp::Ge(_)
+                        | syn::BinOp::Gt(_)
+                );
 
                 let inner_ty = match (&mut left.ty, &mut right.ty) {
                     (Some(left_ty), Some(right_ty)) => {
@@ -280,11 +249,11 @@ impl TypeChecker for TypedExpression {
                         }
                         left.ty.clone()
                     }
-                    (None, Some(right_ty)) => {
+                    (None, Some(_)) => {
                         left.ty = right.ty.clone();
                         right.ty.clone()
                     }
-                    (Some(left_ty), None) => {
+                    (Some(_), None) => {
                         right.ty = left.ty.clone();
                         left.ty.clone()
                     }
@@ -323,7 +292,7 @@ impl TypeChecker for TypedExpression {
                 }
                 expr.ty.clone().map(|ty| {
                     Box::new((
-                        ty.0.into_ref(and_token.clone(), None, *mutability, ty.1),
+                        ty.0.into_ref(*and_token, None, *mutability, ty.1),
                         Span::default(),
                     ))
                 })
@@ -334,7 +303,7 @@ impl TypeChecker for TypedExpression {
                 else_branch,
                 ..
             } => {
-                if let Some((else_span, else_expr)) = else_branch.as_mut() {
+                if let Some((_else_span, else_expr)) = else_branch.as_mut() {
                     let then_type = then_branch.get_type();
                     match (&then_type, &else_expr.ty) {
                         (Some(left_ty), Some(right_ty)) => {
@@ -360,7 +329,7 @@ impl TypeChecker for TypedExpression {
                     Some(Box::new((Type::unit(), Span::default())))
                 }
             }
-            Expression::Cast { expr, as_token, ty } => Some(ty.clone()),
+            Expression::Cast { ty, .. } => Some(ty.clone()),
             Expression::Path(path) => match path.get_ident() {
                 Some(ident) => context.variables.get(ident).map(|(_, ty)| ty.clone()),
                 None => None,
@@ -383,13 +352,7 @@ impl TypeChecker for TypedExpression {
 impl TypeChecker for Statement {
     fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         match self {
-            Statement::Local {
-                let_token,
-                pat,
-                eq_token,
-                init,
-                semi_token,
-            } => {
+            Statement::Local { pat, init, .. } => {
                 pat.0.check_types(context)?;
                 init.check_types(context)?;
                 match &pat.0 {
@@ -406,21 +369,17 @@ impl TypeChecker for Statement {
                         if let Some(ty) = init.ty.clone() {
                             context
                                 .variables
-                                .insert((*ident).clone(), (mutability.clone(), ty));
+                                .insert((*ident).clone(), (*mutability, ty));
                         }
                     }
-                    Pattern::Type {
-                        pat,
-                        colon_token,
-                        ty,
-                    } => {
+                    Pattern::Type { pat, ty, .. } => {
                         if let Pattern::Ident { mutability, ident } = &pat.0 {
                             if init.ty.is_none() {
                                 init.ty = Some(ty.clone());
                             }
                             if context
                                 .variables
-                                .insert(ident.clone(), (mutability.clone(), ty.clone()))
+                                .insert(ident.clone(), (*mutability, ty.clone()))
                                 .is_some()
                             {
                                 return Err((

@@ -347,6 +347,73 @@ pub enum VInst {
     /// TODO: vrem.vv vd, vs2, vs1, vm   # Vector-vector
     /// TODO: vrem.vx vd, vs2, rs1, vm   # vector-scalar
 
+    // // ==== Vector Single-Width Bit Shift Instructions ====
+    // // # Bit shift operations
+    // /// vsll.vv vd, vs2, vs1, vm   # Vector-vector
+    // VsllVv(Ivv),
+    // /// vsll.vx vd, vs2, rs1, vm   # vector-scalar
+    // VsllVv(Ivx),
+    // /// vsll.vi vd, vs2, uimm, vm   # vector-immediate
+    // VsllVv(Ivi),
+
+    // /// vsrl.vv vd, vs2, vs1, vm   # Vector-vector
+    // VsrlVv(Ivv),
+    // /// vsrl.vx vd, vs2, rs1, vm   # vector-scalar
+    // VsrlVx(Ivx),
+    // /// vsrl.vi vd, vs2, uimm, vm   # vector-immediate
+    // VsrlVi(Ivi),
+
+    // // ==== Vector Bitwise Logical Instructions ====
+    // /// vand.vv vd, vs2, vs1, vm   # Vector-vector
+    // VandVv(Ivv),
+    // /// vand.vx vd, vs2, rs1, vm   # vector-scalar
+    // VandVx(Ivx),
+    // /// vand.vi vd, vs2, imm, vm   # vector-immediate
+    // VandVi(Ivi),
+
+    // /// vor.vv vd, vs2, vs1, vm    # Vector-vector
+    // VorVv(Ivv),
+    // /// vor.vx vd, vs2, rs1, vm    # vector-scalar
+    // VorVx(Ivx),
+    // /// vor.vi vd, vs2, imm, vm    # vector-immediate
+    // VorVi(Ivi),
+
+    // /// vxor.vv vd, vs2, vs1, vm    # Vector-vector
+    // VxorVv(Ivv),
+    // /// vxor.vx vd, vs2, rs1, vm    # vector-scalar
+    // VxorVx(Ivx),
+    // /// vxor.vi vd, vs2, imm, vm    # vector-immediate
+    // VxorVi(Ivi),
+
+    // ==== Vector Integer Comparison Instructions ====
+    // `==` # Set if equal
+    /// vmseq.vv vd, vs2, vs1, vm  # Vector-vector
+    /// vmseq.vx vd, vs2, rs1, vm  # vector-scalar
+    /// vmseq.vi vd, vs2, imm, vm  # vector-immediate
+
+    // `!=` # Set if not equal
+    /// vmsne.vv vd, vs2, vs1, vm  # Vector-vector
+    /// vmsne.vx vd, vs2, rs1, vm  # vector-scalar
+    /// vmsne.vi vd, vs2, imm, vm  # vector-immediate
+
+    // `<` # Set if less than, unsigned
+    /// vmsltu.vv vd, vs2, vs1, vm  # Vector-vector
+    /// vmsltu.vx vd, vs2, rs1, vm  # Vector-scalar
+
+    // `<=` # Set if less than or equal, unsigned
+    /// vmsleu.vv vd, vs2, vs1, vm   # Vector-vector
+    /// vmsleu.vx vd, vs2, rs1, vm   # vector-scalar
+    /// vmsleu.vi vd, vs2, imm, vm   # Vector-immediate
+
+    // `>` # Set if greater than, unsigned
+    /// vmsgtu.vx vd, vs2, rs1, vm   # Vector-scalar
+    /// vmsgtu.vi vd, vs2, imm, vm   # Vector-immediate
+
+    // # Following two instructions are not provided directly
+    // # Set if greater than or equal, unsigned
+    // # vmsgeu.vx vd, vs2, rs1, vm    # Vector-scalar
+    // va >= vb        vmsle{u}.vv vd, vb, va, vm    vmsge{u}.vv vd, va, vb, vm
+
     /// Vector unit-stride loads
     /// vle{64, 256, 1024}.v vd, (rs1), vm
     VleV {

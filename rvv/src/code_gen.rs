@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, bail, Error};
+use anyhow::anyhow;
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::token;
 
-use rvv_assembler::{Imm, Ivi, Ivv, Ivx, Uimm, VConfig, VInst, VReg, Vlmul, Vtypei, XReg};
+#[cfg(not(feature = "simulator"))]
+use rvv_assembler::{Ivv, VConfig, VInst, VReg, Vlmul, Vtypei, XReg};
 
 use crate::ast::{
     BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Span, Statement,
@@ -43,21 +44,12 @@ impl Registers {
     }
 }
 
-#[cfg(feature = "simulator")]
-use quote::format_ident;
-#[cfg(feature = "simulator")]
-fn format_sim_ident(dvreg: u8) -> syn::Ident {
-    format_ident!("sim_reg_v{}", dvreg)
-}
-
 #[derive(Default)]
 pub struct CodegenContext {
     // vector registers
     v_registers: Registers,
     // general registers
-    x_registers: Registers,
-
-    tmp_var_id: usize,
+    _x_registers: Registers,
 
     // FIXME: handle varable scope
     // var_name => register_number
@@ -71,7 +63,7 @@ pub struct CodegenContext {
 
     // FIXME: fill in current module
     // ident => (mutability, Type)
-    variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
+    _variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
 
     // [When update v_config]
     //   1. When first vector instruction used update v_config and insert asm!()
@@ -79,9 +71,11 @@ pub struct CodegenContext {
     //     * reset x_registers
     //     * dump all x register data to memory
     //     * update v_config and insert asm!()
+    #[cfg(not(feature = "simulator"))]
     v_config: Option<VConfig>,
 
     // Add original asm to generated code
+    #[allow(dead_code)]
     show_asm: bool,
 }
 
@@ -92,22 +86,16 @@ impl CodegenContext {
     ) -> CodegenContext {
         CodegenContext {
             v_registers: Registers::new("vector", 32),
-            x_registers: Registers::new("general", 32),
-            tmp_var_id: 0,
+            _x_registers: Registers::new("general", 32),
             var_regs: HashMap::default(),
             expr_regs: HashMap::default(),
             #[cfg(feature = "simulator")]
             expr_tokens: HashMap::default(),
-            variables,
+            _variables: variables,
+            #[cfg(not(feature = "simulator"))]
             v_config: None,
             show_asm,
         }
-    }
-
-    fn next_tmp_var_id(&mut self) -> usize {
-        let value = self.tmp_var_id;
-        self.tmp_var_id += 1;
-        value
     }
 
     #[cfg(feature = "simulator")]
@@ -169,7 +157,12 @@ impl CodegenContext {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
                     self.expr_regs.insert(typed_expr.id, *vreg);
                 } else {
-                    let vreg = self.v_registers.next_register().unwrap();
+                    let vreg = self.v_registers.next_register().ok_or_else(|| {
+                        (
+                            typed_expr.expr.1,
+                            anyhow!("not enough V register for this expression"),
+                        )
+                    })?;
                     self.var_regs.insert(var_ident.clone(), vreg);
                     self.expr_regs.insert(typed_expr.id, vreg);
                 }
@@ -225,7 +218,12 @@ impl CodegenContext {
         }
         // FIXME: handle OpCategory::Bool
         if let OpCategory::Binary = op_category {
-            let dvreg = self.v_registers.next_register().unwrap();
+            let dvreg = self.v_registers.next_register().ok_or_else(|| {
+                (
+                    expr.expr.1,
+                    anyhow!("not enough V register for this expression"),
+                )
+            })?;
             self.expr_regs.insert(expr.id, dvreg);
         }
         let ts = match op {
@@ -500,10 +498,15 @@ impl CodegenContext {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
                     self.expr_regs.insert(typed_expr.id, *vreg);
                 } else {
-                    // Load256
-                    let vreg = self.v_registers.next_register().unwrap();
+                    // Load{256,512,1024}
+                    let vreg = self.v_registers.next_register().ok_or_else(|| {
+                        (
+                            typed_expr.expr.1,
+                            anyhow!("not enough V register for this expression"),
+                        )
+                    })?;
                     let inst = VInst::VleV {
-                        width: 256,
+                        width: bit_length,
                         vd: VReg::from_u8(vreg),
                         rs1: XReg::T0,
                         vm: false,
@@ -571,7 +574,12 @@ impl CodegenContext {
         let svreg2 = *self.expr_regs.get(&right.id).unwrap();
         let dvreg = match op_category {
             OpCategory::Binary => {
-                let dvreg = self.v_registers.next_register().unwrap();
+                let dvreg = self.v_registers.next_register().ok_or_else(|| {
+                    (
+                        expr.expr.1,
+                        anyhow!("not enough V register for this expression"),
+                    )
+                })?;
                 self.expr_regs.insert(expr.id, dvreg);
                 dvreg
             }
@@ -853,7 +861,7 @@ impl ToTokenStream for BareFnArg {
         tokens: &mut TokenStream,
         context: &mut CodegenContext,
     ) -> Result<(), SpannedError> {
-        if let Some((ident, colon_token)) = self.name.as_ref() {
+        if let Some((ident, _colon_token)) = self.name.as_ref() {
             ident.to_tokens(tokens);
             token::Colon::default().to_tokens(tokens);
         }
@@ -879,7 +887,6 @@ impl ToTokenStream for Type {
                         token::Semi::default().to_tokens(inner);
                         if let Err(inner_err) = len.to_tokens(inner, context) {
                             *err = Some(inner_err);
-                            return;
                         };
                     });
                 })?;
@@ -921,7 +928,6 @@ impl ToTokenStream for Type {
                     token::Bracket::default().surround(tokens, |inner| {
                         if let Err(inner_err) = elem.0.to_tokens(inner, context) {
                             *err = Some(inner_err);
-                            return;
                         }
                     });
                 })?;
@@ -988,8 +994,8 @@ impl ToTokenStream for Pattern {
 impl ToTokenStream for Expression {
     fn to_tokens(
         &self,
-        tokens: &mut TokenStream,
-        context: &mut CodegenContext,
+        _tokens: &mut TokenStream,
+        _context: &mut CodegenContext,
     ) -> Result<(), SpannedError> {
         Ok(())
     }
@@ -1023,14 +1029,14 @@ impl ToTokenStream for TypedExpression {
                 right.to_tokens(tokens, context)?;
             }
             // x += y;
-            Expression::AssignOp { left, op, right } => {
+            Expression::AssignOp { .. } => {
                 // asm!("xxx");
                 // asm!("xxx");
                 // asm!("xxx");
                 // asm!("xxx", in(reg) left.as_mut_ptr());
                 tokens.extend(Some(context.gen_tokens(self, true, None, 0)?));
             }
-            Expression::Binary { left, op, right } => {
+            Expression::Binary { .. } => {
                 // {
                 //     let rvv_vector_out: U256;
                 //     asm!("xxx");
@@ -1108,7 +1114,6 @@ impl ToTokenStream for TypedExpression {
                         token::Semi::default().to_tokens(inner);
                         if let Err(inner_err) = len.to_tokens(inner, context) {
                             *err = Some(inner_err);
-                            return;
                         }
                     });
                 })?;
@@ -1121,7 +1126,6 @@ impl ToTokenStream for TypedExpression {
                     token::Paren::default().surround(tokens, |inner| {
                         if let Err(inner_err) = expr.to_tokens(inner, context) {
                             *err = Some(inner_err);
-                            return;
                         }
                     });
                 })?;
@@ -1141,7 +1145,6 @@ impl ToTokenStream for TypedExpression {
                     token::Bracket::default().surround(tokens, |inner| {
                         if let Err(inner_err) = index.to_tokens(inner, context) {
                             *err = Some(inner_err);
-                            return;
                         }
                     });
                 })?;
@@ -1457,45 +1460,41 @@ mod test {
         println!("[otuput]: {}", output);
 
         #[cfg(feature = "simulator")]
-        {
-            let expected_output = quote! {
-                fn comp_u1024(x: U1024, y: U1024) -> U1024 {
-                    let z = (x.overflowing_add(y).0).overflowing_mul(x).0;
-                    z
-                }
-            };
-            assert_eq!(output.to_string(), expected_output.to_string());
-        }
+        let expected_output = quote! {
+            fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                let z = (x.overflowing_add(y).0).overflowing_mul(x).0;
+                z
+            }
+        };
+
         #[cfg(not(feature = "simulator"))]
-        {
-            let expected_output = quote! {
-                fn comp_u1024(x: U1024, y: U1024) -> U1024 {
-                    let z = {
-                        unsafe {
-                            asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
-                        }
-                        unsafe {
-                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 208u8, const 2u8, const 16u8 ,)
-                        }
-                        unsafe {
-                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 135u8, const 208u8, const 2u8, const 16u8 ,)
-                        }
-                        unsafe {
-                            asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 1u8, const 16u8, const 0u8 ,)
-                        }
-                        unsafe {
-                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 1u8, const 1u8, const 148u8 ,)
-                        }
-                        let mut tmp_rvv_vector_buf = [0u8; 32];
-                        unsafe {
-                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 241u8, const 2u8, const 16u8 ,)
-                        };
-                        U256::from_little_endian(&tmp_rvv_vector_buf[..])
+        let expected_output = quote! {
+            fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                let z = {
+                    unsafe {
+                        asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
+                    }
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 208u8, const 2u8, const 16u8 ,)
+                    }
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 135u8, const 208u8, const 2u8, const 16u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 1u8, const 16u8, const 0u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 1u8, const 1u8, const 148u8 ,)
+                    }
+                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 241u8, const 2u8, const 16u8 ,)
                     };
-                    z
-                }
-            };
-            assert_eq!(output.to_string(), expected_output.to_string());
-        }
+                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                };
+                z
+            }
+        };
+        assert_eq!(output.to_string(), expected_output.to_string());
     }
 }
