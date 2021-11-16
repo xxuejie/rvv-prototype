@@ -1,5 +1,5 @@
+#[allow(clippy::unusual_byte_groupings)]
 // FIXME: remove all allow later
-#[allow(unused_variables)]
 #[allow(dead_code)]
 mod v_encoder;
 #[allow(unused_imports)]

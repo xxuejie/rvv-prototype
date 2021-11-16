@@ -44,6 +44,49 @@ impl Registers {
     }
 }
 
+enum OpCategory {
+    //   vd = vrs1 op vrs2
+    Binary,
+    // bool = vrs1 op vrs2
+    Bool,
+    // vrs1 = vrs1 op vrs2
+    AssginOp,
+}
+
+impl From<&syn::BinOp> for OpCategory {
+    fn from(op: &syn::BinOp) -> OpCategory {
+        match op {
+            syn::BinOp::Add(_)
+            | syn::BinOp::Sub(_)
+            | syn::BinOp::Mul(_)
+            | syn::BinOp::Div(_)
+            | syn::BinOp::Rem(_)
+            | syn::BinOp::BitXor(_)
+            | syn::BinOp::BitAnd(_)
+            | syn::BinOp::BitOr(_)
+            | syn::BinOp::Shl(_)
+            | syn::BinOp::Shr(_) => OpCategory::Binary,
+            syn::BinOp::And(_) | syn::BinOp::Or(_) => unreachable!(),
+            syn::BinOp::Eq(_)
+            | syn::BinOp::Lt(_)
+            | syn::BinOp::Le(_)
+            | syn::BinOp::Ne(_)
+            | syn::BinOp::Ge(_)
+            | syn::BinOp::Gt(_) => OpCategory::Bool,
+            syn::BinOp::AddEq(_)
+            | syn::BinOp::SubEq(_)
+            | syn::BinOp::MulEq(_)
+            | syn::BinOp::DivEq(_)
+            | syn::BinOp::RemEq(_)
+            | syn::BinOp::BitXorEq(_)
+            | syn::BinOp::BitAndEq(_)
+            | syn::BinOp::BitOrEq(_)
+            | syn::BinOp::ShlEq(_)
+            | syn::BinOp::ShrEq(_) => OpCategory::AssginOp,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct CodegenContext {
     // vector registers
@@ -106,12 +149,6 @@ impl CodegenContext {
         extra_bind_id: Option<usize>,
         mut bit_length: u16,
     ) -> Result<TokenStream, SpannedError> {
-        enum OpCategory {
-            Binary,
-            Bool,
-            AssginOp,
-        }
-
         let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
@@ -173,37 +210,7 @@ impl CodegenContext {
             }
         }
 
-        let op_category = match op {
-            syn::BinOp::Add(_)
-            | syn::BinOp::Sub(_)
-            | syn::BinOp::Mul(_)
-            | syn::BinOp::Div(_)
-            | syn::BinOp::Rem(_)
-            | syn::BinOp::BitXor(_)
-            | syn::BinOp::BitAnd(_)
-            | syn::BinOp::BitOr(_)
-            | syn::BinOp::Shl(_)
-            | syn::BinOp::Shr(_) => OpCategory::Binary,
-            syn::BinOp::And(_)
-            | syn::BinOp::Or(_)
-            | syn::BinOp::Eq(_)
-            | syn::BinOp::Lt(_)
-            | syn::BinOp::Le(_)
-            | syn::BinOp::Ne(_)
-            | syn::BinOp::Ge(_)
-            | syn::BinOp::Gt(_) => OpCategory::Bool,
-            syn::BinOp::AddEq(_)
-            | syn::BinOp::SubEq(_)
-            | syn::BinOp::MulEq(_)
-            | syn::BinOp::DivEq(_)
-            | syn::BinOp::RemEq(_)
-            | syn::BinOp::BitXorEq(_)
-            | syn::BinOp::BitAndEq(_)
-            | syn::BinOp::BitOrEq(_)
-            | syn::BinOp::ShlEq(_)
-            | syn::BinOp::ShrEq(_) => OpCategory::AssginOp,
-        };
-
+        let op_category = OpCategory::from(op);
         let (expr1, bit_len1) = self.expr_tokens.get(&left.id).cloned().unwrap();
         let (expr2, bit_len2) = self.expr_tokens.get(&right.id).cloned().unwrap();
         if bit_len1 != bit_len2 {
@@ -263,18 +270,12 @@ impl CodegenContext {
                     #expr1 % #expr2
                 }
             }
+
             // The `&&` operator (logical and)
-            syn::BinOp::And(_) => {
-                quote! {
-                    #expr1 && #expr2
-                }
-            }
             // The `||` operator (logical or)
-            syn::BinOp::Or(_) => {
-                quote! {
-                    #expr1 || #expr2
-                }
-            }
+            // NOTE: early returned when check type names
+            syn::BinOp::And(_) | syn::BinOp::Or(_) => unreachable!(),
+
             // The `^` operator (bitwise xor)
             syn::BinOp::BitXor(_) => {
                 quote! {
@@ -427,12 +428,6 @@ impl CodegenContext {
         extra_bind_id: Option<usize>,
         mut bit_length: u16,
     ) -> Result<TokenStream, SpannedError> {
-        enum OpCategory {
-            Binary,
-            Bool,
-            AssginOp,
-        }
-
         let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
@@ -545,41 +540,11 @@ impl CodegenContext {
             }
         }
 
-        let op_category = match op {
-            syn::BinOp::Add(_)
-            | syn::BinOp::Sub(_)
-            | syn::BinOp::Mul(_)
-            | syn::BinOp::Div(_)
-            | syn::BinOp::Rem(_)
-            | syn::BinOp::BitXor(_)
-            | syn::BinOp::BitAnd(_)
-            | syn::BinOp::BitOr(_)
-            | syn::BinOp::Shl(_)
-            | syn::BinOp::Shr(_) => OpCategory::Binary,
-            syn::BinOp::And(_)
-            | syn::BinOp::Or(_)
-            | syn::BinOp::Eq(_)
-            | syn::BinOp::Lt(_)
-            | syn::BinOp::Le(_)
-            | syn::BinOp::Ne(_)
-            | syn::BinOp::Ge(_)
-            | syn::BinOp::Gt(_) => OpCategory::Bool,
-            syn::BinOp::AddEq(_)
-            | syn::BinOp::SubEq(_)
-            | syn::BinOp::MulEq(_)
-            | syn::BinOp::DivEq(_)
-            | syn::BinOp::RemEq(_)
-            | syn::BinOp::BitXorEq(_)
-            | syn::BinOp::BitAndEq(_)
-            | syn::BinOp::BitOrEq(_)
-            | syn::BinOp::ShlEq(_)
-            | syn::BinOp::ShrEq(_) => OpCategory::AssginOp,
-        };
-
+        let op_category = OpCategory::from(op);
         let svreg1 = *self.expr_regs.get(&left.id).unwrap();
         let svreg2 = *self.expr_regs.get(&right.id).unwrap();
         let dvreg = match op_category {
-            OpCategory::Binary => {
+            OpCategory::Binary | OpCategory::Bool => {
                 let dvreg = self.v_registers.next_register().ok_or_else(|| {
                     (
                         expr.expr.1,
@@ -589,185 +554,80 @@ impl CodegenContext {
                 self.expr_regs.insert(expr.id, dvreg);
                 dvreg
             }
-            OpCategory::Bool => {
-                unimplemented!();
-            }
             OpCategory::AssginOp => svreg1,
         };
-        let instructions = match op {
+        let ivv = Ivv {
+            vd: VReg::from_u8(dvreg),
+            vs2: VReg::from_u8(svreg2),
+            vs1: VReg::from_u8(svreg1),
+            vm: false,
+        };
+        let inst = match op {
+            // ==== OpCategory::Binary | OpCategory::AssginOp ====
             // The `+` operator (addition)
-            syn::BinOp::Add(_) => {
-                vec![VInst::VaddVv(Ivv {
-                    vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(svreg2),
-                    vs1: VReg::from_u8(svreg1),
-                    vm: false,
-                })]
-            }
+            // The `+=` operator
+            syn::BinOp::Add(_) | syn::BinOp::AddEq(_) => VInst::VaddVv(ivv),
             // The `-` operator (subtraction)
-            syn::BinOp::Sub(_) => {
-                vec![VInst::VsubVv(Ivv {
-                    vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(svreg2),
-                    vs1: VReg::from_u8(svreg1),
-                    vm: false,
-                })]
-            }
+            // The `-=` operator
+            syn::BinOp::Sub(_) | syn::BinOp::SubEq(_) => VInst::VsubVv(ivv),
             // The `*` operator (multiplication)
-            syn::BinOp::Mul(_) => {
-                vec![VInst::VmulVv(Ivv {
-                    vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(svreg2),
-                    vs1: VReg::from_u8(svreg1),
-                    vm: false,
-                })]
-            }
+            // The `*=` operator
+            syn::BinOp::Mul(_) | syn::BinOp::MulEq(_) => VInst::VmulVv(ivv),
             // The `/` operator (division)
-            syn::BinOp::Div(_) => {
-                unimplemented!()
-            }
+            // The `/=` operator
+            syn::BinOp::Div(_) | syn::BinOp::DivEq(_) => VInst::VdivuVv(ivv),
             // The `%` operator (modulus)
-            syn::BinOp::Rem(_) => {
-                vec![VInst::VremuVv(Ivv {
-                    vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(svreg2),
-                    vs1: VReg::from_u8(svreg1),
-                    vm: false,
-                })]
-            }
+            // The `%=` operator
+            syn::BinOp::Rem(_) | syn::BinOp::RemEq(_) => VInst::VremuVv(ivv),
+            // The `^` operator (bitwise xor)
+            // The `^=` operator
+            syn::BinOp::BitXor(_) | syn::BinOp::BitXorEq(_) => VInst::VxorVv(ivv),
+            // The `&` operator (bitwise and)
+            // The `&=` operator
+            syn::BinOp::BitAnd(_) | syn::BinOp::BitAndEq(_) => VInst::VandVv(ivv),
+            // The `|` operator (bitwise or)
+            // The `|=` operator
+            syn::BinOp::BitOr(_) | syn::BinOp::BitOrEq(_) => VInst::VorVv(ivv),
+            // The `<<` operator (shift left)
+            // The `<<=` operator
+            syn::BinOp::Shl(_) | syn::BinOp::ShlEq(_) => VInst::VsllVv(ivv),
+            // The `>>` operator (shift right)
+            // The `>>=` operator
+            syn::BinOp::Shr(_) | syn::BinOp::ShrEq(_) => VInst::VsrlVv(ivv),
 
             // The `&&` operator (logical and)
-            syn::BinOp::And(_) => {
-                unimplemented!()
-            }
             // The `||` operator (logical or)
-            syn::BinOp::Or(_) => {
-                unimplemented!()
-            }
-            // The `^` operator (bitwise xor)
-            syn::BinOp::BitXor(_) => {
-                unimplemented!()
-            }
-            // The `&` operator (bitwise and)
-            syn::BinOp::BitAnd(_) => {
-                unimplemented!()
-            }
-            // The `|` operator (bitwise or)
-            syn::BinOp::BitOr(_) => {
-                unimplemented!()
-            }
-            // The `<<` operator (shift left)
-            syn::BinOp::Shl(_) => {
-                unimplemented!()
-            }
-            // The `>>` operator (shift right)
-            syn::BinOp::Shr(_) => {
-                unimplemented!()
-            }
+            // NOTE: early returned when check type names
+            syn::BinOp::And(_) | syn::BinOp::Or(_) => unreachable!(),
+
+            // ==== OpCategory::Bool ====
             // The `==` operator (equality)
-            syn::BinOp::Eq(_) => {
-                unimplemented!()
-            }
+            syn::BinOp::Eq(_) => VInst::VmseqVv(ivv),
             // The `<` operator (less than)
-            syn::BinOp::Lt(_) => {
-                unimplemented!()
-            }
+            syn::BinOp::Lt(_) => VInst::VmsltuVv(ivv),
             // The `<=` operator (less than or equal to)
-            syn::BinOp::Le(_) => {
-                unimplemented!()
-            }
+            syn::BinOp::Le(_) => VInst::VmsleuVv(ivv),
             // The `!=` operator (not equal to)
-            syn::BinOp::Ne(_) => {
-                unimplemented!()
-            }
+            syn::BinOp::Ne(_) => VInst::VmsneVv(ivv),
             // The `>=` operator (greater than or equal to)
-            syn::BinOp::Ge(_) => {
-                unimplemented!()
-            }
+            syn::BinOp::Ge(_) => VInst::VmsgeuVv(ivv),
             // The `>` operator (greater than)
-            syn::BinOp::Gt(_) => {
-                unimplemented!()
-            }
-            // The `+=` operator
-            syn::BinOp::AddEq(_) => {
-                vec![VInst::VaddVv(Ivv {
-                    vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(svreg2),
-                    vs1: VReg::from_u8(svreg1),
-                    vm: false,
-                })]
-            }
-            // The `-=` operator
-            syn::BinOp::SubEq(_) => {
-                vec![VInst::VsubVv(Ivv {
-                    vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(svreg2),
-                    vs1: VReg::from_u8(svreg1),
-                    vm: false,
-                })]
-            }
-            // The `*=` operator
-            syn::BinOp::MulEq(_) => {
-                vec![VInst::VmulVv(Ivv {
-                    vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(svreg2),
-                    vs1: VReg::from_u8(svreg1),
-                    vm: false,
-                })]
-            }
-            // The `/=` operator
-            syn::BinOp::DivEq(_) => {
-                unimplemented!()
-            }
-            // The `%=` operator
-            syn::BinOp::RemEq(_) => {
-                vec![VInst::VremuVv(Ivv {
-                    vd: VReg::from_u8(dvreg),
-                    vs2: VReg::from_u8(svreg2),
-                    vs1: VReg::from_u8(svreg1),
-                    vm: false,
-                })]
-            }
-            // The `^=` operator
-            syn::BinOp::BitXorEq(_) => {
-                unimplemented!()
-            }
-            // The `&=` operator
-            syn::BinOp::BitAndEq(_) => {
-                unimplemented!()
-            }
-            // The `|=` operator
-            syn::BinOp::BitOrEq(_) => {
-                unimplemented!()
-            }
-            // The `<<=` operator
-            syn::BinOp::ShlEq(_) => {
-                unimplemented!()
-            }
-            // The `>>=` operator
-            syn::BinOp::ShrEq(_) => {
-                unimplemented!()
+            syn::BinOp::Gt(_) => VInst::VmsgtuVv(ivv),
+        };
+        let [b0, b1, b2, b3] = inst.encode_bytes();
+        if self.show_asm {
+            // TODO: use to_string()
+            let comment = format!("{:?}", inst);
+            tokens.extend(Some(quote! {
+                let _ = concat!(#comment);
+            }));
+        }
+        let ts = quote! {
+            unsafe {
+                asm!(".byte {0}, {1}, {2}, {3}", const #b0, const #b1, const #b2, const #b3,)
             }
         };
-        for inst in instructions {
-            let [b0, b1, b2, b3] = inst.encode_bytes();
-            if self.show_asm {
-                // TODO: use to_string()
-                let comment = format!("{:?}", inst);
-                tokens.extend(Some(quote! {
-                    let _ = concat!(#comment);
-                }));
-            }
-            let ts = quote! {
-                unsafe {
-                    asm!(
-                        ".byte {0}, {1}, {2}, {3}",
-                        const #b0, const #b1, const #b2, const #b3,
-                    )
-                }
-            };
-            tokens.extend(Some(ts));
-        }
+        tokens.extend(Some(ts));
 
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {

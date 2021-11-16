@@ -296,8 +296,6 @@ pub enum VConfig {
 // 32 bit
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum VInst {
-    VConfig(VConfig),
-
     // ==== Vector Integer Arithmetic Instructions ====
 
     // # Integer adds
@@ -337,6 +335,12 @@ pub enum VInst {
     // # Signed(vs2)-Unsigned multiply, returning high bits of product
     /// TODO: vmulhsu.vv vd, vs2, vs1, vm   # Vector-vector
     /// TODO: vmulhsu.vx vd, vs2, rs1, vm   # vector-scalar
+
+    // # Unsigned divide.
+    /// vdivu.vv vd, vs2, vs1, vm   # Vector-vector
+    VdivuVv(Ivv),
+    /// vdivu.vx vd, vs2, rs1, vm   # vector-scalar
+    VdivuVx(Ivx),
 
     // # Unsigned remainder
     /// vremu.vv vd, vs2, vs1, vm   # Vector-vector
@@ -417,6 +421,8 @@ pub enum VInst {
     VmsleuVi(Ivi),
 
     // `>` # Set if greater than, unsigned
+    /// vmsgtu.vv vd, vs2, vs1, vm   # Vector-vector
+    VmsgtuVv(Ivv),
     /// vmsgtu.vx vd, vs2, rs1, vm   # Vector-scalar
     VmsgtuVx(Ivx),
     /// vmsgtu.vi vd, vs2, imm, vm   # Vector-immediate
@@ -427,6 +433,18 @@ pub enum VInst {
     // # vmsgeu.vx vd, vs2, rs1, vm    # Vector-scalar
     // va >= vb        vmsle{u}.vv vd, vb, va, vm    vmsge{u}.vv vd, va, vb, vm
     VmsgeuVv(Ivv),
+
+    /// vfirst.m rd, vs2, vm
+    VfirstM {
+        rd: XReg,
+        vs2: VReg,
+        vm: bool,
+    },
+
+    /// vsetvli rd, rs1, vtypei   # rd = new vl, rs1 = AVL, vtypei = new vtype setting
+    /// vsetivli rd, uimm, vtypei # rd = new vl, uimm = AVL, vtypei = new vtype setting
+    /// vsetvl  rd, rs1, rs2      # rd = new vl, rs1 = AVL, rs2 = new vtype value
+    VConfig(VConfig),
 
     /// Vector unit-stride loads
     /// vle{64, 256, 1024}.v vd, (rs1), vm
@@ -526,6 +544,12 @@ impl VInst {
             VInst::VmulVx(ivx) => {
                 return ivx.encode_u32(funct6::VMUL);
             }
+            VInst::VdivuVv(ivv) => {
+                return ivv.encode_u32(funct6::VDIVU);
+            }
+            VInst::VdivuVx(ivx) => {
+                return ivx.encode_u32(funct6::VDIVU);
+            }
             VInst::VremuVv(ivv) => {
                 return ivv.encode_u32(funct6::VREMU);
             }
@@ -616,6 +640,15 @@ impl VInst {
             VInst::VmsleuVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSLEU);
             }
+            VInst::VmsgtuVv(Ivv { vd, vs2, vs1, vm }) => {
+                return VInst::VmsltuVv(Ivv {
+                    vd,
+                    vm,
+                    vs2: vs1,
+                    vs1: vs2,
+                })
+                .encode_u32();
+            }
             VInst::VmsgtuVx(ivx) => {
                 return ivx.encode_u32(funct6::VMSGTU);
             }
@@ -633,6 +666,16 @@ impl VInst {
             }
 
             // ==== other instructions ====
+            VInst::VfirstM { rd, vs2, vm } => {
+                let mut value = 0b010000_0_00000_10001_010_00000_1010111;
+                value = set_bits(value, OFFSET_DST, rd as u8 as u32);
+                value = set_bits(value, OFFSET_SRC2, vs2 as u8 as u32);
+                if vm {
+                    value = set_bits(value, OFFSET_VM, 1);
+                }
+                return value;
+            }
+
             VInst::VConfig(cfg) => match cfg {
                 VConfig::Vsetvli { rd, rs1, vtypei } => {
                     let funct3: u8 = funct3::OPCFG;
