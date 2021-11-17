@@ -1,0 +1,27 @@
+[package]
+name = "alt_bn128"
+version = "0.1.0"
+edition = "2018"
+authors = ["Sean Bowe <ewillbefull@gmail.com>", "Parity Technologies <admin@parity.io>", "Mohanson <mohanson@outlook.com>"]
+description = "Pairing cryptography with the Barreto-Naehrig curve"
+keywords = ["pairing", "crypto", "cryptography"]
+homepage = "https://github.com/paritytech/bn"
+repository = "https://github.com/paritytech/bn"
+license = "MIT OR Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["use_rvv_vector", "simulator"]
+use_rvv_vector = []
+simulator = ["rvv/simulator"]
+
+[profile.release]
+lto = "fat"
+
+[dependencies]
+byteorder = { version = "1.0", features = ["i128"], default-features = false }
+crunchy = "0.2.1"
+lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
+uint = { version = "0.9.1", default-features = false }
+rvv = { path = "../rvv" }
+ckb-std = "0.9.0"
