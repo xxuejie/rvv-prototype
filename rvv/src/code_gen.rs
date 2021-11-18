@@ -156,7 +156,7 @@ impl CodegenContext {
                 let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length)?;
                 return Ok(quote! {(#ts)});
             }
-            _ => return Err((expr.expr.1, anyhow!("invalid top level expression"))),
+            _  => return Err((expr.expr.1, anyhow!("invalid expression, inner expression must be simple variable name or binary op"))),
         };
         if !top_level && is_assign {
             return Err((
@@ -260,8 +260,9 @@ impl CodegenContext {
             }
             // The `/` operator (division)
             syn::BinOp::Div(_) => {
+                let uint_type = quote::format_ident!("U{}", bit_length);
                 quote! {
-                    #expr1.checked_div(#expr2).unwrap()
+                    #expr1.checked_div(#expr2).unwrap_or_else(|| #uint_type::max_value())
                 }
             }
             // The `%` operator (modulus)
@@ -362,8 +363,9 @@ impl CodegenContext {
             }
             // The `/=` operator
             syn::BinOp::DivEq(_) => {
+                let uint_type = quote::format_ident!("U{}", bit_length);
                 quote! {
-                    #expr1 = #expr1.checked_div(#expr2).unwrap()
+                    #expr1 = #expr1.checked_div(#expr2).unwrap_or_else(|| #uint_type::max_value())
                 }
             }
             // The `%=` operator
@@ -434,7 +436,7 @@ impl CodegenContext {
             Expression::Paren { expr: sub_expr, .. } => {
                 return self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
             }
-            _ => return Err((expr.expr.1, anyhow!("invalid top level expression"))),
+            _  => return Err((expr.expr.1, anyhow!("invalid expression, inner expression must be simple variable name or binary op"))),
         };
         if !top_level && is_assign {
             return Err((
@@ -1268,7 +1270,7 @@ mod test {
         let input = quote! {
             fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
                 let x_bytes = x.to_le_bytes();
-                let j = x + (z * y);
+                let j = x + (z * y / w);
                 if x > y && y == z {
                     z = x & (z | y);
                 }
@@ -1281,6 +1283,8 @@ mod test {
                 z += y;
                 z %= y;
                 z >>= y;
+                let zero = U256::zero();
+                z /= zero;
                 z
             }
         };
@@ -1293,7 +1297,13 @@ mod test {
             let expected_output = quote! {
                 fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
                     let x_bytes = x.to_le_bytes();
-                    let j = x.overflowing_add((z.overflowing_mul(y).0)).0;
+                    let j = x
+                        .overflowing_add(
+                            (z.overflowing_mul(y)
+                             .0
+                             .checked_div(w)
+                             .unwrap_or_else(|| U256::max_value())))
+                        .0;
                     if x > y && y == z {
                         z = x & (z | y);
                     }
@@ -1308,6 +1318,8 @@ mod test {
                     z = z.overflowing_add(y).0;
                     z %= y;
                     z >>= y;
+                    let zero = U256::zero();
+                    z = z.checked_div(zero).unwrap_or_else(|| U256::max_value());
                     z
                 }
             };
@@ -1320,6 +1332,8 @@ mod test {
         let input = quote! {
             fn comp_u1024(x: U1024, y: U1024) -> U1024 {
                 let z = (x + y) * x;
+                let zero = U1024::zero();
+                let q = z / zero;
                 z
             }
         };
