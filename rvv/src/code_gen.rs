@@ -637,6 +637,8 @@ impl CodegenContext {
         }
 
         // FIXME: handle OpCategory::Bool
+        //   1. add vfirst.m asm
+        //   2. add label for jump
         if top_level && !is_assign {
             let vreg = *self.expr_regs.get(&expr.id).unwrap();
             let inst = VInst::VseV {
@@ -1341,10 +1343,10 @@ mod test {
                         asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 208u8, const 2u8, const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 240u8, const 2u8, const 16u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 135u8, const 208u8, const 2u8, const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 135u8, const 240u8, const 2u8, const 16u8 ,)
                     }
                     unsafe {
                         asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 1u8, const 16u8, const 0u8 ,)
