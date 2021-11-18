@@ -1,11 +1,8 @@
 use core::cmp::{Eq, Ord, Ordering, PartialEq};
 use core::hash::{Hash, Hasher};
-use std::collections::HashMap;
 use std::fmt;
 
-use anyhow::{anyhow, bail, Error};
 use proc_macro2::Span as Span2;
-use syn::token;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Span(pub Span2);
@@ -60,9 +57,9 @@ impl From<Span2> for Span {
         Span(x)
     }
 }
-impl Into<Span2> for Span {
-    fn into(self) -> Span2 {
-        self.0
+impl From<Span> for Span2 {
+    fn from(x: Span) -> Span2 {
+        x.0
     }
 }
 
@@ -221,10 +218,7 @@ impl Type {
         }
     }
     pub fn is_ref(&self) -> bool {
-        match self {
-            Type::Reference { .. } => true,
-            _ => false,
-        }
+        matches!(self, Type::Reference { .. })
     }
 
     pub fn type_ident(&self) -> Option<&syn::Ident> {
@@ -235,7 +229,15 @@ impl Type {
         }
     }
     pub fn type_name(&self) -> Option<String> {
-        self.type_ident().map(|ident| ident.to_string())
+        self.type_ident()
+            .map(|ident| ident.to_string())
+            .map(|name| {
+                if self.is_ref() {
+                    format!("&{}", name)
+                } else {
+                    name
+                }
+            })
     }
 
     pub fn unit() -> Type {
@@ -720,9 +722,6 @@ impl Expression {
             _ => None,
         }
     }
-    pub fn var_name(&self) -> Option<String> {
-        self.var_ident().map(|ident| ident.to_string())
-    }
 }
 
 // pub enum Stmt {
@@ -770,10 +769,8 @@ pub struct Block {
 
 impl Block {
     pub fn get_type(&self) -> Option<Box<WithSpan<Type>>> {
-        if let Some((stmt, _span)) = self.stmts.last() {
-            if let Statement::Expr(expr) = stmt {
-                return expr.ty.clone();
-            }
+        if let Some((Statement::Expr(expr), _span)) = self.stmts.last() {
+            return expr.ty.clone();
         }
         Some(Box::new((Type::unit(), Span::default())))
     }

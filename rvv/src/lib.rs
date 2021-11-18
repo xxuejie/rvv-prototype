@@ -2,8 +2,7 @@
 
 extern crate proc_macro;
 use anyhow::anyhow;
-use proc_macro::{Diagnostic, Level, Span, TokenStream};
-use proc_macro2::Span as Span2;
+use proc_macro::{Diagnostic, Level, TokenStream};
 use quote::quote;
 use std::convert::TryFrom;
 use syn::{parse_macro_input, ItemFn};

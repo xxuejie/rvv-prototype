@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 
 use crate::ast::{
     BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Span, Statement,
@@ -275,7 +275,7 @@ impl TryFrom<&syn::Expr> for Expression {
             syn::Expr::Call(syn::ExprCall { func, args, paren_token, .. }) => {
                 let func = Box::new(TypedExpression::try_from(&**func)?);
                 let args = args.iter()
-                    .map(|expr| Ok(TypedExpression::try_from(expr)?))
+                    .map(TypedExpression::try_from)
                     .collect::<Result<Vec<TypedExpression>, SpannedError>>()?;
                 let paren_token = paren_token.span.into();
                 Ok(Expression::Call { func, args, paren_token })
@@ -577,7 +577,7 @@ impl TryFrom<&syn::Signature> for Signature {
                 anyhow!("extern \"C\" function is not supported by rvv_vector"),
             ));
         }
-        if let Some(lt_token) = sig.generics.lt_token.as_ref() {
+        if let Some(_lt_token) = sig.generics.lt_token.as_ref() {
             return Err((
                 sig.generics.span().into(),
                 anyhow!("generic type parameter is not supported by rvv_vector"),
