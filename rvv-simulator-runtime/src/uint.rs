@@ -335,7 +335,7 @@ impl<const N: usize> crate::core_::convert::TryFrom<Uint<N>> for i128 {
     fn try_from(u: Uint<N>) -> crate::core_::result::Result<i128, &'static str> {
         let err_str = "integer overflow when casting to i128";
         let i = u128::try_from(u).map_err(|_| err_str)?;
-        if i > i128::max_value() as u128 {
+        if i > i128::MAX as u128 {
             Err(err_str)
         } else {
             Ok(i as i128)
@@ -361,6 +361,11 @@ impl<const N: usize> Uint<N> {
     const WORD_BITS: usize = 64;
     /// Maximum value.
     pub const MAX: Self = Uint::<N>([u64::MAX; N]);
+    pub const NN: usize= N;
+
+    pub fn get_n(self) -> usize {
+        Self::NN
+    }
 
     /// Converts a string slice in a given base to an integer. Only supports radixes of 10
     /// and 16.
@@ -1200,26 +1205,27 @@ impl<const N: usize> Uint<N> {
         Self(ret)
     }
 }
-//
-// impl<const N: usize> crate::core_::convert::From<Uint<N>> for [u8; N * 8] where [u8; N*8] : Sized {
-//     fn from(number: Uint<N>) -> Self {
-//         let mut arr = [0u8; N * 8];
-//         number.to_big_endian(&mut arr);
-//         arr
-//     }
-// }
-//
-// impl<const N: usize> crate::core_::convert::From<[u8; N * 8]> for Uint<N> {
-//     fn from(bytes: [u8; N * 8]) -> Self {
-//         Self::from(&bytes)
-//     }
-// }
 
-// impl<'a, const N: usize> crate::core_::convert::From<&'a [u8; N * 8]> for Uint<N> where [u64; N*8] : Sized {
-//     fn from(bytes: &[u8; N * 8]) -> Self {
-//         Self::from(&bytes[..])
-//     }
-// }
+impl<const N: usize, const M: usize> crate::core_::convert::From<Uint<M>> for [u8; N] {
+    fn from(number: Uint<M>) -> Self {
+        let mut arr = [0u8; N];
+        number.to_big_endian(&mut arr);
+        arr
+    }
+}
+
+
+impl<const N: usize, const M: usize> crate::core_::convert::From<[u8; M]> for Uint<N> {
+    fn from(bytes: [u8; M]) -> Self {
+        Self::from(&bytes)
+    }
+}
+
+impl<'a, const N: usize, const M: usize> crate::core_::convert::From<&'a [u8; M]> for Uint<N> where [u64; M] : Sized {
+    fn from(bytes: &[u8; M]) -> Self {
+        Self::from(&bytes[..])
+    }
+}
 
 impl<const N: usize> crate::core_::default::Default for Uint<N> {
     fn default() -> Self {
@@ -1327,10 +1333,8 @@ impl<const N: usize> crate::core_::ops::SubAssign<Uint<N>> for Uint<N> {
     }
 }
 
-
 impl<const N: usize> crate::core_::str::FromStr for Uint<N> {
     type Err = crate::FromHexError;
-
     fn from_str(value: &str) -> crate::core_::result::Result<Uint<N>, Self::Err> {
         let value = value.strip_prefix("0x").unwrap_or(value);
         // can't use `N+1`: use maximum value instead
@@ -1341,10 +1345,6 @@ impl<const N: usize> crate::core_::str::FromStr for Uint<N> {
         let mut bytes = [0_u8; BYTES_LEN];
 
         let encoded = value.as_bytes();
-
-        if encoded.len() > MAX_ENCODED_LEN {
-            return Err(crate::hex::FromHexError::InvalidStringLength.into());
-        }
 
         if encoded.len() % 2 == 0 {
             let out = &mut bytes[BYTES_LEN - encoded.len() / 2..];
@@ -1362,7 +1362,16 @@ impl<const N: usize> crate::core_::str::FromStr for Uint<N> {
         }
 
         let bytes_ref: &[u8] = &bytes;
-        Ok(From::from(bytes_ref))
+        let res : Uint<N> = From::from(bytes_ref);
+
+        let n = res.get_n();
+        let bytes_len: usize = n * 8;
+        let max_encoded_len: usize = bytes_len * 2;
+        if encoded.len() > max_encoded_len {
+            return Err(crate::hex::FromHexError::InvalidStringLength.into());
+        }
+
+        Ok(res)
     }
 }
 
