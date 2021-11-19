@@ -12,7 +12,5 @@ pub use hex;
 #[doc(hidden)]
 pub use static_assertions;
 
-#[macro_use]
-#[rustfmt::skip]
 mod uint;
 pub use crate::uint::*;

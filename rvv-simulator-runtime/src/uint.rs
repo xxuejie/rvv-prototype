@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use core::fmt;
 use alloc::vec::Vec;
+use core::fmt;
 
 use crate::byteorder::{BigEndian, ByteOrder, LittleEndian};
 
@@ -44,7 +44,10 @@ pub struct FromStrRadixErr {
 impl FromStrRadixErr {
     #[doc(hidden)]
     pub fn unsupported() -> Self {
-        Self { kind: FromStrRadixErrKind::UnsupportedRadix, source: None }
+        Self {
+            kind: FromStrRadixErrKind::UnsupportedRadix,
+            source: None,
+        }
     }
 
     /// Returns the corresponding `FromStrRadixErrKind` for this error.
@@ -61,8 +64,12 @@ impl fmt::Display for FromStrRadixErr {
 
         match self.kind {
             FromStrRadixErrKind::UnsupportedRadix => write!(f, "the given radix is not supported"),
-            FromStrRadixErrKind::InvalidCharacter => write!(f, "input contains an invalid character"),
-            FromStrRadixErrKind::InvalidLength => write!(f, "length not supported for radix or type"),
+            FromStrRadixErrKind::InvalidCharacter => {
+                write!(f, "input contains an invalid character")
+            }
+            FromStrRadixErrKind::InvalidLength => {
+                write!(f, "length not supported for radix or type")
+            }
         }
     }
 }
@@ -85,7 +92,10 @@ impl From<FromDecStrErr> for FromStrRadixErr {
             FromDecStrErr::InvalidLength => FromStrRadixErrKind::InvalidLength,
         };
 
-        Self { kind, source: Some(FromStrRadixErrSrc::Dec(e)) }
+        Self {
+            kind,
+            source: Some(FromStrRadixErrSrc::Dec(e)),
+        }
     }
 }
 
@@ -97,7 +107,10 @@ impl From<FromHexError> for FromStrRadixErr {
             hex::FromHexError::OddLength => FromStrRadixErrKind::InvalidLength,
         };
 
-        Self { kind, source: Some(FromStrRadixErrSrc::Hex(e)) }
+        Self {
+            kind,
+            source: Some(FromStrRadixErrSrc::Hex(e)),
+        }
     }
 }
 
@@ -155,7 +168,6 @@ impl From<hex::FromHexError> for FromHexError {
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Uint<const N: usize>(pub [u64; N]);
 
-
 impl<const N: usize> crate::core_::convert::From<u128> for Uint<N> {
     fn from(value: u128) -> Self {
         let mut ret = [0; N];
@@ -169,7 +181,9 @@ impl<const N: usize> crate::core_::convert::From<i128> for Uint<N> {
     fn from(value: i128) -> Self {
         match value >= 0 {
             true => From::from(value as u128),
-            false => { panic!("Unsigned integer can't be created from negative value"); }
+            false => {
+                panic!("Unsigned integer can't be created from negative value");
+            }
         }
     }
 }
@@ -177,115 +191,113 @@ impl<const N: usize> crate::core_::convert::From<i128> for Uint<N> {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! overflowing {
-	($op: expr, $overflow: expr) => {{
-		let (overflow_x, overflow_overflow) = $op;
-		$overflow |= overflow_overflow;
-		overflow_x
-	}};
-	($op: expr) => {{
-		let (overflow_x, _overflow_overflow) = $op;
-		overflow_x
-	}};
+    ($op: expr, $overflow: expr) => {{
+        let (overflow_x, overflow_overflow) = $op;
+        $overflow |= overflow_overflow;
+        overflow_x
+    }};
+    ($op: expr) => {{
+        let (overflow_x, _overflow_overflow) = $op;
+        overflow_x
+    }};
 }
 
 #[macro_export]
 #[doc(hidden)]
 macro_rules! panic_on_overflow {
-	($name: expr) => {
-		if $name {
-			panic!("arithmetic operation overflow")
-		}
-	};
+    ($name: expr) => {
+        if $name {
+            panic!("arithmetic operation overflow")
+        }
+    };
 }
 
 #[macro_export]
 #[doc(hidden)]
 macro_rules! impl_map_from {
-	($thing:ident, $from:ty, $to:ty) => {
-		impl<const N: usize> From<$from> for $thing<N> {
-			fn from(value: $from) -> $thing<N> {
-				From::from(value as $to)
-			}
-		}
-	};
+    ($thing:ident, $from:ty, $to:ty) => {
+        impl<const N: usize> From<$from> for $thing<N> {
+            fn from(value: $from) -> $thing<N> {
+                From::from(value as $to)
+            }
+        }
+    };
 }
-
 
 #[macro_export]
 #[doc(hidden)]
 macro_rules! impl_mul_for_primitive {
-	($name: ty, $other: ident) => {
-		impl<const N: usize> $crate::core_::ops::Mul<$other> for $name {
-			type Output = $name;
+    ($name: ty, $other: ident) => {
+        impl<const N: usize> $crate::core_::ops::Mul<$other> for $name {
+            type Output = $name;
 
-			fn mul(self, other: $other) -> Self::Output {
-				let (result, carry) = self.overflowing_mul_u64(other as u64);
-				panic_on_overflow!(carry > 0);
-				result
-			}
-		}
+            fn mul(self, other: $other) -> Self::Output {
+                let (result, carry) = self.overflowing_mul_u64(other as u64);
+                panic_on_overflow!(carry > 0);
+                result
+            }
+        }
 
-		impl<'a, const N: usize> $crate::core_::ops::Mul<&'a $other> for $name {
-			type Output = $name;
+        impl<'a, const N: usize> $crate::core_::ops::Mul<&'a $other> for $name {
+            type Output = $name;
 
-			fn mul(self, other: &'a $other) -> Self::Output {
-				let (result, carry) = self.overflowing_mul_u64(*other as u64);
-				panic_on_overflow!(carry > 0);
-				result
-			}
-		}
+            fn mul(self, other: &'a $other) -> Self::Output {
+                let (result, carry) = self.overflowing_mul_u64(*other as u64);
+                panic_on_overflow!(carry > 0);
+                result
+            }
+        }
 
-		impl<'a, const N: usize> $crate::core_::ops::Mul<&'a $other> for &'a $name {
-			type Output = $name;
+        impl<'a, const N: usize> $crate::core_::ops::Mul<&'a $other> for &'a $name {
+            type Output = $name;
 
-			fn mul(self, other: &'a $other) -> Self::Output {
-				let (result, carry) = self.overflowing_mul_u64(*other as u64);
-				panic_on_overflow!(carry > 0);
-				result
-			}
-		}
+            fn mul(self, other: &'a $other) -> Self::Output {
+                let (result, carry) = self.overflowing_mul_u64(*other as u64);
+                panic_on_overflow!(carry > 0);
+                result
+            }
+        }
 
-		impl<'a, const N: usize> $crate::core_::ops::Mul<$other> for &'a $name {
-			type Output = $name;
+        impl<'a, const N: usize> $crate::core_::ops::Mul<$other> for &'a $name {
+            type Output = $name;
 
-			fn mul(self, other: $other) -> Self::Output {
-				let (result, carry) = self.overflowing_mul_u64(other as u64);
-				panic_on_overflow!(carry > 0);
-				result
-			}
-		}
+            fn mul(self, other: $other) -> Self::Output {
+                let (result, carry) = self.overflowing_mul_u64(other as u64);
+                panic_on_overflow!(carry > 0);
+                result
+            }
+        }
 
-		impl<const N: usize> $crate::core_::ops::MulAssign<$other> for $name {
-			fn mul_assign(&mut self, other: $other) {
-				let result = *self * (other as u64);
-				*self = result
-			}
-		}
-	};
+        impl<const N: usize> $crate::core_::ops::MulAssign<$other> for $name {
+            fn mul_assign(&mut self, other: $other) {
+                let result = *self * (other as u64);
+                *self = result
+            }
+        }
+    };
 }
-
 
 #[macro_export]
 #[doc(hidden)]
 macro_rules! impl_try_from_for_primitive {
-	($from:ty, $to:ty) => {
-		impl<const N: usize> $crate::core_::convert::TryFrom<$from> for $to {
-			type Error = &'static str;
+    ($from:ty, $to:ty) => {
+        impl<const N: usize> $crate::core_::convert::TryFrom<$from> for $to {
+            type Error = &'static str;
 
-			#[inline]
-			fn try_from(u: $from) -> $crate::core_::result::Result<$to, &'static str> {
-				let arr = &u.0;
-				if !u.fits_word() || arr[0] > <$to>::max_value() as u64 {
-					Err(concat!(
-						"integer overflow when casting to ",
-						stringify!($to)
-					))
-				} else {
-					Ok(arr[0] as $to)
-				}
-			}
-		}
-	};
+            #[inline]
+            fn try_from(u: $from) -> $crate::core_::result::Result<$to, &'static str> {
+                let arr = &u.0;
+                if !u.fits_word() || arr[0] > <$to>::max_value() as u64 {
+                    Err(concat!(
+                        "integer overflow when casting to ",
+                        stringify!($to)
+                    ))
+                } else {
+                    Ok(arr[0] as $to)
+                }
+            }
+        }
+    };
 }
 
 impl<const N: usize> Uint<N> {
@@ -361,7 +373,7 @@ impl<const N: usize> Uint<N> {
     const WORD_BITS: usize = 64;
     /// Maximum value.
     pub const MAX: Self = Uint::<N>([u64::MAX; N]);
-    pub const NN: usize= N;
+    pub const NN: usize = N;
 
     pub fn get_n(self) -> usize {
         Self::NN
@@ -412,7 +424,6 @@ impl<const N: usize> Uint<N> {
         arr[0]
     }
 
-
     /// Conversion to u32 with overflow checking
     ///
     /// # Panics
@@ -459,7 +470,11 @@ impl<const N: usize> Uint<N> {
     #[inline]
     pub fn is_zero(&self) -> bool {
         let &Self(ref arr) = self;
-        for i in 0..N { if arr[i] != 0 { return false; } }
+        for i in 0..N {
+            if arr[i] != 0 {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -467,7 +482,11 @@ impl<const N: usize> Uint<N> {
     #[inline]
     fn fits_word(&self) -> bool {
         let &Self(ref arr) = self;
-        for i in 1..N { if arr[i] != 0 { return false; } }
+        for i in 1..N {
+            if arr[i] != 0 {
+                return false;
+            }
+        }
         return true;
     }
     /// Return the least number of bits needed to represent the number
@@ -475,7 +494,9 @@ impl<const N: usize> Uint<N> {
     pub fn bits(&self) -> usize {
         let &Self(ref arr) = self;
         for i in 1..N {
-            if arr[N - i] > 0 { return (0x40 * (N - i + 1)) - arr[N - i].leading_zeros() as usize; }
+            if arr[N - i] > 0 {
+                return (0x40 * (N - i + 1)) - arr[N - i].leading_zeros() as usize;
+            }
         }
         0x40 - arr[0].leading_zeros() as usize
     }
@@ -529,7 +550,7 @@ impl<const N: usize> Uint<N> {
     #[inline]
     pub const fn byte(&self, index: usize) -> u8 {
         let &Self(ref arr) = self;
-        (arr[index / 8] >> (((index % 8)) * 8)) as u8
+        (arr[index / 8] >> ((index % 8) * 8)) as u8
     }
 
     /// Write to the slice in big-endian format.
@@ -544,7 +565,6 @@ impl<const N: usize> Uint<N> {
     /// Write to the slice in little-endian format.
     #[inline]
     pub fn to_little_endian(&self, bytes: &mut [u8]) {
-        use crate::byteorder::{ByteOrder, LittleEndian};
         debug_assert!(N * 8 == bytes.len());
         for i in 0..N {
             LittleEndian::write_u64(&mut bytes[8 * i..], self.0[i]);
@@ -560,7 +580,7 @@ impl<const N: usize> Uint<N> {
     pub fn exp10(n: usize) -> Self {
         match n {
             0 => Self::from(1u64),
-            _ => Self::exp10(n - 1) * 10u32
+            _ => Self::exp10(n - 1) * 10u32,
         }
     }
 
@@ -586,16 +606,15 @@ impl<const N: usize> Uint<N> {
         Self(result)
     }
 
-
     fn full_shl(self, shift: u32) -> (Self, u64) {
         debug_assert!(shift < Self::WORD_BITS as u32);
         let mut u = [0u64; N];
         let u_lo = self.0[0] << shift;
         let u_hi = self >> (Self::WORD_BITS as u32 - shift);
         u[0] = u_lo;
-        u[1..N].copy_from_slice(&u_hi.0[..N-1]);
+        u[1..N].copy_from_slice(&u_hi.0[..N - 1]);
 
-        (Self(u), u_hi.0[N-1])
+        (Self(u), u_hi.0[N - 1])
     }
 
     fn full_shr(u: Vec<u64>, shift: u32) -> Self {
@@ -616,7 +635,7 @@ impl<const N: usize> Uint<N> {
     fn full_mul_u64(self, by: u64) -> Vec<u64> {
         let (prod, carry) = self.overflowing_mul_u64(by);
         let mut res = Vec::<u64>::new();
-        res.resize(N+1, 0);
+        res.resize(N + 1, 0);
 
         res[..N].copy_from_slice(&prod.0[..]);
         res[N] = carry;
@@ -645,7 +664,7 @@ impl<const N: usize> Uint<N> {
         // u will store the remainder (shifted)
         let (u0, u_high) = self.full_shl(shift);
         let mut u = Vec::<u64>::new();
-        u.resize(N+1, 0);
+        u.resize(N + 1, 0);
 
         u[0..N].copy_from_slice(&u0.0[0..N]);
         u[N] = u_high;
@@ -776,7 +795,6 @@ impl<const N: usize> Uint<N> {
         }
     }
 
-
     /// Fast exponentiation by squaring
     /// https://en.wikipedia.org/wiki/Exponentiation_by_squaring
     ///
@@ -810,7 +828,9 @@ impl<const N: usize> Uint<N> {
 
     /// Fast exponentiation by squaring. Returns result and overflow flag.
     pub fn overflowing_pow(self, expon: Self) -> (Self, bool) {
-        if expon.is_zero() { return (Self::one(), false); }
+        if expon.is_zero() {
+            return (Self::one(), false);
+        }
 
         let is_even = |x: &Self| x.low_u64() & 1 == 0;
 
@@ -833,7 +853,6 @@ impl<const N: usize> Uint<N> {
         let res = overflowing!(x.overflowing_mul(y), overflow);
         (res, overflow)
     }
-
 
     /// Checked exponentiation. Returns `None` if overflow occurred.
     pub fn checked_pow(self, expon: Self) -> Option<Self> {
@@ -952,7 +971,7 @@ impl<const N: usize> Uint<N> {
         let Self(ref me) = self;
         let Self(ref you) = other;
         let mut ret = Vec::<u64>::new();
-        ret.resize(N*2, 0);
+        ret.resize(N * 2, 0);
 
         for i in 0..N {
             let mut carry = 0u64;
@@ -995,7 +1014,7 @@ impl<const N: usize> Uint<N> {
         let mut ret0 = [0u64; N];
         let mut ret1 = [0u64; N];
         ret0.copy_from_slice(&ret[0..N]);
-        ret1.copy_from_slice(&ret[N..2*N]);
+        ret1.copy_from_slice(&ret[N..2 * N]);
 
         let ret0 = Self(ret0);
         let ret1 = Self(ret1);
@@ -1020,7 +1039,6 @@ impl<const N: usize> Uint<N> {
             (val, false) => val,
         }
     }
-
 
     /// Checked multiplication. Returns `None` if overflow occurred.
     pub fn checked_mul(self, other: Self) -> Option<Self> {
@@ -1065,7 +1083,6 @@ impl<const N: usize> Uint<N> {
         }
     }
 
-
     #[inline(always)]
     fn div_mod_word(hi: u64, lo: u64, y: u64) -> (u64, u64) {
         debug_assert!(hi < y);
@@ -1092,7 +1109,10 @@ impl<const N: usize> Uint<N> {
             }
         }
 
-        let un21 = un32.wrapping_mul(TWO32).wrapping_add(un1).wrapping_sub(q1.wrapping_mul(y));
+        let un21 = un32
+            .wrapping_mul(TWO32)
+            .wrapping_add(un1)
+            .wrapping_sub(q1.wrapping_mul(y));
         let mut q0 = un21 / yn1;
         rhat = un21.wrapping_sub(q0.wrapping_mul(yn1));
 
@@ -1104,7 +1124,10 @@ impl<const N: usize> Uint<N> {
             }
         }
 
-        let rem = un21.wrapping_mul(TWO32).wrapping_add(un0).wrapping_sub(y.wrapping_mul(q0));
+        let rem = un21
+            .wrapping_mul(TWO32)
+            .wrapping_add(un0)
+            .wrapping_sub(y.wrapping_mul(q0));
         (q1 * TWO32 + q0, rem >> s)
     }
 
@@ -1119,7 +1142,11 @@ impl<const N: usize> Uint<N> {
     }
 
     #[inline(always)]
-    fn binop_slice(a: &mut [u64], b: &[u64], binop: impl Fn(u64, u64) -> (u64, bool) + Copy) -> bool {
+    fn binop_slice(
+        a: &mut [u64],
+        b: &[u64],
+        binop: impl Fn(u64, u64) -> (u64, bool) + Copy,
+    ) -> bool {
         let mut c = false;
         a.iter_mut().zip(b.iter()).for_each(|(x, y)| {
             let (res, carry) = Self::binop_carry(*x, *y, c, binop);
@@ -1130,7 +1157,12 @@ impl<const N: usize> Uint<N> {
     }
 
     #[inline(always)]
-    fn binop_carry(a: u64, b: u64, c: bool, binop: impl Fn(u64, u64) -> (u64, bool)) -> (u64, bool) {
+    fn binop_carry(
+        a: u64,
+        b: u64,
+        c: bool,
+        binop: impl Fn(u64, u64) -> (u64, bool),
+    ) -> (u64, bool) {
         let (res1, overflow1) = b.overflowing_add(u64::from(c));
         let (res2, overflow2) = binop(a, res1);
         (res2, overflow1 || overflow2)
@@ -1152,7 +1184,6 @@ impl<const N: usize> Uint<N> {
         ((a >> 64) as _, (a & 0xFFFFFFFFFFFFFFFF) as _)
     }
 
-
     /// Overflowing multiplication by u64.
     /// Returns the result and carry.
     fn overflowing_mul_u64(mut self, other: u64) -> (Self, u64) {
@@ -1167,18 +1198,17 @@ impl<const N: usize> Uint<N> {
         (self, carry)
     }
 
-
     /// Converts from big endian representation bytes in memory.
     pub fn from_big_endian(slice: &[u8]) -> Self {
         // assert!(N * 8 >= slice.len());
-        let slice = if slice.len() > (N*8) {
-            &slice[slice.len() - N*8 .. slice.len()]
+        let slice = if slice.len() > (N * 8) {
+            &slice[slice.len() - N * 8..slice.len()]
         } else {
             slice
         };
 
         let mut padded = Vec::<u8>::new();
-        padded.resize(N*8, 0);
+        padded.resize(N * 8, 0);
 
         padded[N * 8 - slice.len()..N * 8].copy_from_slice(&slice);
 
@@ -1194,7 +1224,7 @@ impl<const N: usize> Uint<N> {
         assert!(N * 8 >= slice.len());
 
         let mut padded = Vec::<u8>::new();
-        padded.resize(N*8, 0);
+        padded.resize(N * 8, 0);
 
         padded[0..slice.len()].copy_from_slice(&slice);
 
@@ -1214,14 +1244,16 @@ impl<const N: usize, const M: usize> crate::core_::convert::From<Uint<M>> for [u
     }
 }
 
-
 impl<const N: usize, const M: usize> crate::core_::convert::From<[u8; M]> for Uint<N> {
     fn from(bytes: [u8; M]) -> Self {
         Self::from(&bytes)
     }
 }
 
-impl<'a, const N: usize, const M: usize> crate::core_::convert::From<&'a [u8; M]> for Uint<N> where [u64; M] : Sized {
+impl<'a, const N: usize, const M: usize> crate::core_::convert::From<&'a [u8; M]> for Uint<N>
+where
+    [u64; M]: Sized,
+{
     fn from(bytes: &[u8; M]) -> Self {
         Self::from(&bytes[..])
     }
@@ -1241,7 +1273,6 @@ impl<const N: usize> crate::core_::convert::From<u64> for Uint<N> {
     }
 }
 
-
 impl_map_from!(Uint, u8, u64);
 impl_map_from!(Uint, u16, u64);
 impl_map_from!(Uint, u32, u64);
@@ -1251,7 +1282,9 @@ impl<const N: usize> crate::core_::convert::From<i64> for Uint<N> {
     fn from(value: i64) -> Self {
         match value >= 0 {
             true => From::from(value as u64),
-            false => { panic!("Unsigned integer can't be created from negative value"); }
+            false => {
+                panic!("Unsigned integer can't be created from negative value");
+            }
         }
     }
 }
@@ -1279,7 +1312,10 @@ impl_try_from_for_primitive!(Uint<N>, i32);
 impl_try_from_for_primitive!(Uint<N>, isize);
 impl_try_from_for_primitive!(Uint<N>, i64);
 
-impl<T, const N: usize> crate::core_::ops::Add<T> for Uint<N> where T: Into<Uint<N>> {
+impl<T, const N: usize> crate::core_::ops::Add<T> for Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
 
     fn add(self, other: T) -> Uint<N> {
@@ -1289,8 +1325,10 @@ impl<T, const N: usize> crate::core_::ops::Add<T> for Uint<N> where T: Into<Uint
     }
 }
 
-
-impl<'a, T, const N: usize> crate::core_::ops::Add<T> for &'a Uint<N> where T: Into<Uint<N>> {
+impl<'a, T, const N: usize> crate::core_::ops::Add<T> for &'a Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
 
     fn add(self, other: T) -> Self::Output {
@@ -1306,7 +1344,10 @@ impl<const N: usize> crate::core_::ops::AddAssign<Uint<N>> for Uint<N> {
     }
 }
 
-impl<T, const N: usize> crate::core_::ops::Sub<T> for Uint<N> where T: Into<Uint<N>> {
+impl<T, const N: usize> crate::core_::ops::Sub<T> for Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
 
     #[inline]
@@ -1317,7 +1358,10 @@ impl<T, const N: usize> crate::core_::ops::Sub<T> for Uint<N> where T: Into<Uint
     }
 }
 
-impl<'a, T, const N: usize> crate::core_::ops::Sub<T> for &'a Uint<N> where T: Into<Uint<N>> {
+impl<'a, T, const N: usize> crate::core_::ops::Sub<T> for &'a Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
 
     fn sub(self, other: T) -> Uint<N> {
@@ -1362,7 +1406,7 @@ impl<const N: usize> crate::core_::str::FromStr for Uint<N> {
         }
 
         let bytes_ref: &[u8] = &bytes;
-        let res : Uint<N> = From::from(bytes_ref);
+        let res: Uint<N> = From::from(bytes_ref);
 
         let n = res.get_n();
         let bytes_len: usize = n * 8;
@@ -1446,7 +1490,10 @@ impl_mul_for_primitive!(Uint<N>, i32);
 impl_mul_for_primitive!(Uint<N>, i64);
 impl_mul_for_primitive!(Uint<N>, isize);
 
-impl<T, const N: usize> crate::core_::ops::Div<T> for Uint<N> where T: Into<Uint<N>> {
+impl<T, const N: usize> crate::core_::ops::Div<T> for Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
 
     fn div(self, other: T) -> Uint<N> {
@@ -1455,7 +1502,10 @@ impl<T, const N: usize> crate::core_::ops::Div<T> for Uint<N> where T: Into<Uint
     }
 }
 
-impl<'a, T, const N: usize> crate::core_::ops::Div<T> for &'a Uint<N> where T: Into<Uint<N>> {
+impl<'a, T, const N: usize> crate::core_::ops::Div<T> for &'a Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
 
     fn div(self, other: T) -> Uint<N> {
@@ -1463,13 +1513,19 @@ impl<'a, T, const N: usize> crate::core_::ops::Div<T> for &'a Uint<N> where T: I
     }
 }
 
-impl<T, const N: usize> crate::core_::ops::DivAssign<T> for Uint<N> where T: Into<Uint<N>> {
+impl<T, const N: usize> crate::core_::ops::DivAssign<T> for Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     fn div_assign(&mut self, other: T) {
         *self = *self / other.into();
     }
 }
 
-impl<T, const N: usize> crate::core_::ops::Rem<T> for Uint<N> where T: Into<Uint<N>> + Copy {
+impl<T, const N: usize> crate::core_::ops::Rem<T> for Uint<N>
+where
+    T: Into<Uint<N>> + Copy,
+{
     type Output = Uint<N>;
 
     fn rem(self, other: T) -> Self::Output {
@@ -1479,7 +1535,10 @@ impl<T, const N: usize> crate::core_::ops::Rem<T> for Uint<N> where T: Into<Uint
     }
 }
 
-impl<'a, T, const N: usize> crate::core_::ops::Rem<T> for &'a Uint<N> where T: Into<Uint<N>> + Copy {
+impl<'a, T, const N: usize> crate::core_::ops::Rem<T> for &'a Uint<N>
+where
+    T: Into<Uint<N>> + Copy,
+{
     type Output = Uint<N>;
 
     fn rem(self, other: T) -> Self::Output {
@@ -1487,7 +1546,10 @@ impl<'a, T, const N: usize> crate::core_::ops::Rem<T> for &'a Uint<N> where T: I
     }
 }
 
-impl<T, const N: usize> crate::core_::ops::RemAssign<T> for Uint<N> where T: Into<Uint<N>> + Copy {
+impl<T, const N: usize> crate::core_::ops::RemAssign<T> for Uint<N>
+where
+    T: Into<Uint<N>> + Copy,
+{
     fn rem_assign(&mut self, other: T) {
         let other: Self = other.into();
         let rem = self.div_mod(other).1;
@@ -1554,7 +1616,10 @@ impl<const N: usize> crate::core_::ops::Not for Uint<N> {
     }
 }
 
-impl<T, const N: usize> crate::core_::ops::Shl<T> for Uint<N> where T: Into<Uint<N>> {
+impl<T, const N: usize> crate::core_::ops::Shl<T> for Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Self;
 
     fn shl(self, shift: T) -> Self {
@@ -1564,11 +1629,11 @@ impl<T, const N: usize> crate::core_::ops::Shl<T> for Uint<N> where T: Into<Uint
         let word_shift = shift / 64;
         let bit_shift = shift % 64;
 
-// shift
+        // shift
         for i in word_shift..N {
             ret[i] = original[i - word_shift] << bit_shift;
         }
-// carry
+        // carry
         if bit_shift > 0 {
             for i in word_shift + 1..N {
                 ret[i] += original[i - 1 - word_shift] >> (64 - bit_shift);
@@ -1578,20 +1643,29 @@ impl<T, const N: usize> crate::core_::ops::Shl<T> for Uint<N> where T: Into<Uint
     }
 }
 
-impl<'a, T, const N: usize> crate::core_::ops::Shl<T> for &'a Uint<N> where T: Into<Uint<N>> {
+impl<'a, T, const N: usize> crate::core_::ops::Shl<T> for &'a Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
     fn shl(self, shift: T) -> Uint<N> {
         *self << shift
     }
 }
 
-impl<T, const N: usize> crate::core_::ops::ShlAssign<T> for Uint<N> where T: Into<Uint<N>> {
+impl<T, const N: usize> crate::core_::ops::ShlAssign<T> for Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     fn shl_assign(&mut self, shift: T) {
         *self = *self << shift;
     }
 }
 
-impl<T, const N: usize> crate::core_::ops::Shr<T> for Uint<N> where T: Into<Uint<N>> {
+impl<T, const N: usize> crate::core_::ops::Shr<T> for Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
 
     fn shr(self, shift: T) -> Self::Output {
@@ -1617,14 +1691,20 @@ impl<T, const N: usize> crate::core_::ops::Shr<T> for Uint<N> where T: Into<Uint
     }
 }
 
-impl<'a, T, const N: usize> crate::core_::ops::Shr<T> for &'a Uint<N> where T: Into<Uint<N>> {
+impl<'a, T, const N: usize> crate::core_::ops::Shr<T> for &'a Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     type Output = Uint<N>;
     fn shr(self, shift: T) -> Self::Output {
         *self >> shift
     }
 }
 
-impl<T, const N: usize> crate::core_::ops::ShrAssign<T> for Uint<N> where T: Into<Uint<N>> {
+impl<T, const N: usize> crate::core_::ops::ShrAssign<T> for Uint<N>
+where
+    T: Into<Uint<N>>,
+{
     fn shr_assign(&mut self, shift: T) {
         *self = *self >> shift;
     }
@@ -1656,7 +1736,7 @@ impl<const N: usize> crate::core_::fmt::Display for Uint<N> {
 
         // let mut buf = [0_u8; N * 20];
         let mut buf = Vec::<u8>::new();
-        buf.resize(N*20, 0);
+        buf.resize(N * 20, 0);
 
         let mut i = buf.len() - 1;
         let mut current = *self;
@@ -1673,9 +1753,7 @@ impl<const N: usize> crate::core_::fmt::Display for Uint<N> {
         }
 
         // sequence of `'0'..'9'` chars is guaranteed to be a valid UTF8 string
-        let s = unsafe {
-            crate::core_::str::from_utf8_unchecked(&buf[i..])
-        };
+        let s = unsafe { crate::core_::str::from_utf8_unchecked(&buf[i..]) };
         f.write_str(s)
     }
 }
@@ -1707,4 +1785,3 @@ impl<const N: usize> crate::core_::fmt::LowerHex for Uint<N> {
         Ok(())
     }
 }
-
