@@ -478,10 +478,9 @@ impl CodegenContext {
             self.v_config = Some(v_config);
             let [b0, b1, b2, b3] = VInst::VConfig(v_config).encode_bytes();
             if self.show_asm {
-                // TODO: use to_string()
-                let comment = format!("{:?}", v_config);
+                let comment = format!("{}", v_config);
                 tokens.extend(Some(quote! {
-                    let _ = concat!(#comment);
+                    let _ = #comment;
                 }));
             }
             let ts = quote! {
@@ -508,6 +507,7 @@ impl CodegenContext {
                             anyhow!("not enough V register for this expression"),
                         )
                     })?;
+                    // FIXME: t0 register may already used by Rust code
                     let inst = VInst::VleV {
                         width: bit_length,
                         vd: VReg::from_u8(vreg),
@@ -516,10 +516,9 @@ impl CodegenContext {
                     };
                     let [b0, b1, b2, b3] = inst.encode_bytes();
                     if self.show_asm {
-                        // TODO: use VInst::to_string()
-                        let comment = format!("{:?}", inst);
+                        let comment = format!("{}", inst);
                         tokens.extend(Some(quote! {
-                            let _ = concat!(#comment);
+                            let _ = #comment;
                         }));
                     }
                     let ts = quote! {
@@ -618,10 +617,9 @@ impl CodegenContext {
         };
         let [b0, b1, b2, b3] = inst.encode_bytes();
         if self.show_asm {
-            // TODO: use to_string()
-            let comment = format!("{:?}", inst);
+            let comment = format!("{}", inst);
             tokens.extend(Some(quote! {
-                let _ = concat!(#comment);
+                let _ = #comment;
             }));
         }
         let ts = quote! {
@@ -652,10 +650,9 @@ impl CodegenContext {
                 };
                 let [b0, b1, b2, b3] = inst.encode_bytes();
                 if self.show_asm {
-                    // TODO: use to_string()
-                    let comment = format!("{:?}", inst);
+                    let comment = format!("{}", inst);
                     tokens.extend(Some(quote! {
-                        let _ = concat!(#comment);
+                        let _ = #comment;
                     }));
                 }
                 tokens.extend(Some(quote! {
@@ -687,10 +684,9 @@ impl CodegenContext {
                 };
                 let [b0, b1, b2, b3] = inst.encode_bytes();
                 if self.show_asm {
-                    // TODO: use to_string()
-                    let comment = format!("{:?}", inst);
+                    let comment = format!("{}", inst);
                     tokens.extend(Some(quote! {
-                        let _ = concat!(#comment);
+                        let _ = #comment;
                         let _ = "mv {tmp_rv_t0} t0";
                     }));
                 }
