@@ -1,0 +1,24 @@
+[package]
+description = "RISC-V V extension(rvv) library simulator"
+name = "rvv-simulator-runtime"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+byteorder = { version = "1.4.2", default-features = false }
+hex = { version = "0.4", default-features = false }
+static_assertions = "1.0.0"
+
+
+[features]
+default = ["std"]
+std = ["byteorder/std", "hex/std"]
+
+
+[[test]]
+name = "uint_tests"
+required-features = ["std"]
+
