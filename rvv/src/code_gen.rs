@@ -526,7 +526,7 @@ impl CodegenContext {
                             asm!(
                                 "mv t0, {0}",
                                 ".byte {1}, {2}, {3}, {4}",
-                                in(reg) #var_ident.to_le_bytes().as_ptr(),
+                                in(reg) #var_ident.as_ref().as_ptr(),
                                 const #b0, const #b1, const #b2, const #b3,
                             )
                         }
@@ -636,9 +636,6 @@ impl CodegenContext {
             }
         }
 
-        // FIXME: handle OpCategory::Bool
-        //   1. add vfirst.m asm
-        //   2. add label for jump
         match op_category {
             OpCategory::Binary if top_level => {
                 let vreg = *self.expr_regs.get(&expr.id).unwrap();
@@ -655,8 +652,9 @@ impl CodegenContext {
                         let _ = #comment;
                     }));
                 }
+                let uint_type = quote::format_ident!("U{}", bit_length);
                 tokens.extend(Some(quote! {
-                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    let mut tmp_rvv_vector_buf = [0u8; #bit_length as usize / 8];
                     unsafe {
                         asm!(
                             "mv t0, {0}",
@@ -666,7 +664,7 @@ impl CodegenContext {
                             const #b0, const #b1, const #b2, const #b3,
                         )
                     };
-                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                    #uint_type::from_little_endian(&tmp_rvv_vector_buf[..])
                 }));
                 let mut rv = TokenStream::new();
                 token::Brace::default().surround(&mut rv, |inner| {
