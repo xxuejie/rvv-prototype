@@ -431,10 +431,10 @@ fn encode_vai(dst: u8, funct3: u8, src1: u8, src2: u8, vm: bool, funct6: u8) -> 
 }
 
 impl Ivv {
-    fn encode_u32(&self, funct6: u8) -> u32 {
+    fn encode_u32(&self, funct6: u8, funct3: u8) -> u32 {
         encode_vai(
             self.vd as u8,
-            funct3::OPIVV,
+            funct3,
             self.vs1 as u8,
             self.vs2 as u8,
             self.vm,
@@ -443,10 +443,10 @@ impl Ivv {
     }
 }
 impl Ivx {
-    fn encode_u32(&self, funct6: u8) -> u32 {
+    fn encode_u32(&self, funct6: u8, funct3: u8) -> u32 {
         encode_vai(
             self.vd as u8,
-            funct3::OPIVX,
+            funct3,
             self.rs1 as u8,
             self.vs2 as u8,
             self.vm,
@@ -722,60 +722,60 @@ impl VInst {
         let (base, rest, src1, funct3, dst) = match self {
             // ==== Vector Integer Arithmetic Instructions ====
             VInst::VaddVv(ivv) => {
-                return ivv.encode_u32(funct6::VADD);
+                return ivv.encode_u32(funct6::VADD, funct3::OPIVV);
             }
             VInst::VaddVx(ivx) => {
-                return ivx.encode_u32(funct6::VADD);
+                return ivx.encode_u32(funct6::VADD, funct3::OPIVX);
             }
             VInst::VaddVi(ivi) => {
                 return ivi.encode_u32(funct6::VADD);
             }
             VInst::VsubVv(ivv) => {
-                return ivv.encode_u32(funct6::VSUB);
+                return ivv.encode_u32(funct6::VSUB, funct3::OPIVV);
             }
             VInst::VsubVx(ivx) => {
-                return ivx.encode_u32(funct6::VSUB);
+                return ivx.encode_u32(funct6::VSUB, funct3::OPIVX);
             }
             VInst::VrsubVx(ivx) => {
-                return ivx.encode_u32(funct6::VRSUB);
+                return ivx.encode_u32(funct6::VRSUB, funct3::OPIVX);
             }
             VInst::VrsubVi(ivi) => {
                 return ivi.encode_u32(funct6::VRSUB);
             }
             VInst::VmulVv(ivv) => {
-                return ivv.encode_u32(funct6::VMUL);
+                return ivv.encode_u32(funct6::VMUL, funct3::OPMVV);
             }
             VInst::VmulVx(ivx) => {
-                return ivx.encode_u32(funct6::VMUL);
+                return ivx.encode_u32(funct6::VMUL, funct3::OPMVX);
             }
             VInst::VdivuVv(ivv) => {
-                return ivv.encode_u32(funct6::VDIVU);
+                return ivv.encode_u32(funct6::VDIVU, funct3::OPMVV);
             }
             VInst::VdivuVx(ivx) => {
-                return ivx.encode_u32(funct6::VDIVU);
+                return ivx.encode_u32(funct6::VDIVU, funct3::OPMVX);
             }
             VInst::VremuVv(ivv) => {
-                return ivv.encode_u32(funct6::VREMU);
+                return ivv.encode_u32(funct6::VREMU, funct3::OPMVV);
             }
             VInst::VremuVx(ivx) => {
-                return ivx.encode_u32(funct6::VREMU);
+                return ivx.encode_u32(funct6::VREMU, funct3::OPMVX);
             }
 
             // ==== Vector Single-Width Bit Shift Instructions ====
             VInst::VsllVv(ivv) => {
-                return ivv.encode_u32(funct6::VSLL);
+                return ivv.encode_u32(funct6::VSLL, funct3::OPIVV);
             }
             VInst::VsllVx(ivx) => {
-                return ivx.encode_u32(funct6::VSLL);
+                return ivx.encode_u32(funct6::VSLL, funct3::OPIVX);
             }
             VInst::VsllVi(ivi) => {
                 return ivi.encode_u32(funct6::VSLL);
             }
             VInst::VsrlVv(ivv) => {
-                return ivv.encode_u32(funct6::VSRL);
+                return ivv.encode_u32(funct6::VSRL, funct3::OPIVV);
             }
             VInst::VsrlVx(ivx) => {
-                return ivx.encode_u32(funct6::VSRL);
+                return ivx.encode_u32(funct6::VSRL, funct3::OPIVX);
             }
             VInst::VsrlVi(ivi) => {
                 return ivi.encode_u32(funct6::VSRL);
@@ -783,28 +783,28 @@ impl VInst {
 
             // ==== Vector Bitwise Logical Instructions ====
             VInst::VandVv(ivv) => {
-                return ivv.encode_u32(funct6::VAND);
+                return ivv.encode_u32(funct6::VAND, funct3::OPIVV);
             }
             VInst::VandVx(ivx) => {
-                return ivx.encode_u32(funct6::VAND);
+                return ivx.encode_u32(funct6::VAND, funct3::OPIVX);
             }
             VInst::VandVi(ivi) => {
                 return ivi.encode_u32(funct6::VAND);
             }
             VInst::VorVv(ivv) => {
-                return ivv.encode_u32(funct6::VOR);
+                return ivv.encode_u32(funct6::VOR, funct3::OPIVV);
             }
             VInst::VorVx(ivx) => {
-                return ivx.encode_u32(funct6::VOR);
+                return ivx.encode_u32(funct6::VOR, funct3::OPIVX);
             }
             VInst::VorVi(ivi) => {
                 return ivi.encode_u32(funct6::VOR);
             }
             VInst::VxorVv(ivv) => {
-                return ivv.encode_u32(funct6::VXOR);
+                return ivv.encode_u32(funct6::VXOR, funct3::OPIVV);
             }
             VInst::VxorVx(ivx) => {
-                return ivx.encode_u32(funct6::VXOR);
+                return ivx.encode_u32(funct6::VXOR, funct3::OPIVX);
             }
             VInst::VxorVi(ivi) => {
                 return ivi.encode_u32(funct6::VXOR);
@@ -812,34 +812,34 @@ impl VInst {
 
             // ==== Vector Integer Comparison Instructions ====
             VInst::VmseqVv(ivv) => {
-                return ivv.encode_u32(funct6::VMSEQ);
+                return ivv.encode_u32(funct6::VMSEQ, funct3::OPIVV);
             }
             VInst::VmseqVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSEQ);
+                return ivx.encode_u32(funct6::VMSEQ, funct3::OPIVX);
             }
             VInst::VmseqVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSEQ);
             }
             VInst::VmsneVv(ivv) => {
-                return ivv.encode_u32(funct6::VMSNE);
+                return ivv.encode_u32(funct6::VMSNE, funct3::OPIVV);
             }
             VInst::VmsneVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSNE);
+                return ivx.encode_u32(funct6::VMSNE, funct3::OPIVX);
             }
             VInst::VmsneVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSNE);
             }
             VInst::VmsltuVv(ivv) => {
-                return ivv.encode_u32(funct6::VMSLTU);
+                return ivv.encode_u32(funct6::VMSLTU, funct3::OPIVV);
             }
             VInst::VmsltuVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSLTU);
+                return ivx.encode_u32(funct6::VMSLTU, funct3::OPIVX);
             }
             VInst::VmsleuVv(ivv) => {
-                return ivv.encode_u32(funct6::VMSLEU);
+                return ivv.encode_u32(funct6::VMSLEU, funct3::OPIVV);
             }
             VInst::VmsleuVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSLEU);
+                return ivx.encode_u32(funct6::VMSLEU, funct3::OPIVX);
             }
             VInst::VmsleuVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSLEU);
@@ -854,7 +854,7 @@ impl VInst {
                 .encode_u32();
             }
             VInst::VmsgtuVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSGTU);
+                return ivx.encode_u32(funct6::VMSGTU, funct3::OPIVX);
             }
             VInst::VmsgtuVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSGTU);

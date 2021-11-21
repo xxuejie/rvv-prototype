@@ -476,9 +476,10 @@ impl CodegenContext {
         };
         if self.v_config.as_ref() != Some(&v_config) {
             self.v_config = Some(v_config);
-            let [b0, b1, b2, b3] = VInst::VConfig(v_config).encode_bytes();
+            let inst = VInst::VConfig(v_config);
+            let [b0, b1, b2, b3] = inst.encode_bytes();
             if self.show_asm {
-                let comment = format!("{}", v_config);
+                let comment = format!("{} - {}", inst.encode_u32(), inst);
                 tokens.extend(Some(quote! {
                     let _ = #comment;
                 }));
@@ -516,7 +517,7 @@ impl CodegenContext {
                     };
                     let [b0, b1, b2, b3] = inst.encode_bytes();
                     if self.show_asm {
-                        let comment = format!("{}", inst);
+                        let comment = format!("{} - {}", inst.encode_u32(), inst);
                         tokens.extend(Some(quote! {
                             let _ = #comment;
                         }));
@@ -617,7 +618,7 @@ impl CodegenContext {
         };
         let [b0, b1, b2, b3] = inst.encode_bytes();
         if self.show_asm {
-            let comment = format!("{}", inst);
+            let comment = format!("{} - {}", inst, inst.encode_u32());
             tokens.extend(Some(quote! {
                 let _ = #comment;
             }));
@@ -647,7 +648,7 @@ impl CodegenContext {
                 };
                 let [b0, b1, b2, b3] = inst.encode_bytes();
                 if self.show_asm {
-                    let comment = format!("{}", inst);
+                    let comment = format!("{} - {}", inst, inst.encode_u32());
                     tokens.extend(Some(quote! {
                         let _ = #comment;
                     }));
@@ -682,7 +683,7 @@ impl CodegenContext {
                 };
                 let [b0, b1, b2, b3] = inst.encode_bytes();
                 if self.show_asm {
-                    let comment = format!("{}", inst);
+                    let comment = format!("{} - {}", inst, inst.encode_u32());
                     tokens.extend(Some(quote! {
                         let _ = #comment;
                         let _ = "mv {tmp_rv_t0} t0";
