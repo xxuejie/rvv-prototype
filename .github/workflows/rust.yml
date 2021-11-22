@@ -9,17 +9,17 @@ jobs:
 
     steps:
     - uses: actions/checkout@v1
-    - name: Install Rust target
-      run: rustup target add riscv64imac-unknown-none-elf
     - name: Install ckb-debugger
       run: |
+        cd ..
         git clone -b rvv https://github.com/mohanson/ckb-standalone-debugger
-        cd bins
-        rm Cargo.lock
+        cd ckb-standalone-debugger/bins
         cargo install --path . -f
     - name: Run mont-example rvv_vector tests
       run: |
         docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd mont-example && make rvv_vector'
         cd mont-example && make run
     - name: Run mont-example simulator tests
-      run: cd mont-example && make simulator && make run
+      run: |
+        docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd mont-example && make simulator'
+        cd mont-example && make run
