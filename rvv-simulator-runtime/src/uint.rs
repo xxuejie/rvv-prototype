@@ -1811,3 +1811,18 @@ convert!(4, 8);
 convert!(8, 16);
 // U1024 <-> U2048
 convert!(16, 32);
+
+impl<const N: usize> Uint<N> {
+    pub fn wrapping_add(self, other: Self) -> Self {
+        let (res, _) = self.overflowing_add(other);
+        res
+    }
+    pub fn wrapping_sub(self, other: Self) -> Self {
+        let (res, _) = self.overflowing_sub(other);
+        res
+    }
+    pub fn wrapping_mul(self, other: Self) -> Self {
+        let (res, _) = self.overflowing_mul(other);
+        res
+    }
+}
