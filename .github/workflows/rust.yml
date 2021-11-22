@@ -1,0 +1,17 @@
+name: Rust
+
+on: [push, pull_request]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: Install Rust target
+      run: rustup target add riscv64imac-unknown-none-elf
+    - name: Run mont-example simulator tests
+      run: cd mont-example && make simulator && make run
+    - name: Run mont-example rvv_vector tests
+      run: cd mont-example && make rvv_vector && make run
