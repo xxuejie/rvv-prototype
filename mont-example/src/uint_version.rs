@@ -7,7 +7,24 @@ use core::cell::RefCell;
 use core::ops::{Add, Mul, Sub};
 use rvv::rvv_vector;
 
-use uint::construct_uint;
+use rvv_simulator_runtime::Uint;
+
+pub type U256 = Uint<4>;
+pub type U512 = Uint<8>;
+
+#[macro_export]
+macro_rules! U256 {
+    ($e: expr) => {
+        Uint::<4>($e)
+    };
+}
+
+#[macro_export]
+macro_rules! U512 {
+    ($e: expr) => {
+        Uint::<8>($e)
+    };
+}
 
 #[macro_export]
 macro_rules! U {
@@ -16,40 +33,7 @@ macro_rules! U {
     };
 }
 
-construct_uint! {
-    pub struct U256(4);
-}
-
-construct_uint! {
-    pub struct U512(8);
-}
-
 pub type I512 = SignedInteger<U512>;
-
-impl From<U256> for U512 {
-    fn from(u: U256) -> Self {
-        let U256(ref arr) = u;
-        let mut val = [0; 8];
-        val[0] = arr[0];
-        val[1] = arr[1];
-        val[2] = arr[2];
-        val[3] = arr[3];
-        Self(val)
-    }
-}
-
-impl From<U512> for U256 {
-    // use it with care
-    fn from(u: U512) -> Self {
-        let U512(ref arr) = u;
-        let mut val = [0; 4];
-        val[0] = arr[0];
-        val[1] = arr[1];
-        val[2] = arr[2];
-        val[3] = arr[3];
-        Self(val)
-    }
-}
 
 impl From<U256> for I512 {
     fn from(n: U256) -> Self {

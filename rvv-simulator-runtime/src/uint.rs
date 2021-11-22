@@ -475,7 +475,7 @@ impl<const N: usize> Uint<N> {
                 return false;
             }
         }
-        return true;
+        true
     }
 
     // Whether this fits u64.
@@ -487,7 +487,7 @@ impl<const N: usize> Uint<N> {
                 return false;
             }
         }
-        return true;
+        true
     }
     /// Return the least number of bits needed to represent the number
     #[inline]
@@ -814,14 +814,13 @@ impl<const N: usize> Uint<N> {
         while n > u_one {
             if is_even(&n) {
                 x = x * x;
-                n = n >> 1usize;
             } else {
                 y = x * y;
                 x = x * x;
                 // to reduce odd number by 1 we should just clear the last bit
-                n.0[N - 1] = n.0[N - 1] & ((!0u64) >> 1);
-                n = n >> 1usize;
+                n.0[N - 1] &= (!0u64) >> 1;
             }
+            n >>= 1usize;
         }
         x * y
     }
@@ -843,7 +842,7 @@ impl<const N: usize> Uint<N> {
         while n > u_one {
             if is_even(&n) {
                 x = overflowing!(x.overflowing_mul(x), overflow);
-                n = n >> 1usize;
+                n >>= 1usize;
             } else {
                 y = overflowing!(x.overflowing_mul(y), overflow);
                 x = overflowing!(x.overflowing_mul(x), overflow);
@@ -881,7 +880,7 @@ impl<const N: usize> Uint<N> {
 
                 unsafe {
                     // SAFETY: `i` is within bounds and `i * size_of::<u64>() < isize::MAX`
-                    *ret_ptr.offset(i as _) = res2
+                    *ret_ptr.add(i) = res2
                 }
                 carry = (overflow1 as u8 + overflow2 as u8) as u64;
             } else {
@@ -889,7 +888,7 @@ impl<const N: usize> Uint<N> {
 
                 unsafe {
                     // SAFETY: `i` is within bounds and `i * size_of::<u64>() < isize::MAX`
-                    *ret_ptr.offset(i as _) = res
+                    *ret_ptr.add(i) = res
                 }
 
                 carry = overflow as u64;
@@ -934,7 +933,7 @@ impl<const N: usize> Uint<N> {
 
                 unsafe {
                     // SAFETY: `i` is within bounds and `i * size_of::<u64>() < isize::MAX`
-                    *ret_ptr.offset(i as _) = res2
+                    *ret_ptr.add(i) = res2
                 }
                 carry = (overflow1 as u8 + overflow2 as u8) as u64;
             } else {
@@ -942,7 +941,7 @@ impl<const N: usize> Uint<N> {
 
                 unsafe {
                     // SAFETY: `i` is within bounds and `i * size_of::<u64>() < isize::MAX`
-                    *ret_ptr.offset(i as _) = res
+                    *ret_ptr.add(i) = res
                 }
 
                 carry = overflow as u64;
@@ -1210,7 +1209,7 @@ impl<const N: usize> Uint<N> {
         let mut padded = Vec::<u8>::new();
         padded.resize(N * 8, 0);
 
-        padded[N * 8 - slice.len()..N * 8].copy_from_slice(&slice);
+        padded[N * 8 - slice.len()..N * 8].copy_from_slice(slice);
 
         let mut ret = [0; N];
         for i in 0..N {
@@ -1226,7 +1225,7 @@ impl<const N: usize> Uint<N> {
         let mut padded = Vec::<u8>::new();
         padded.resize(N * 8, 0);
 
-        padded[0..slice.len()].copy_from_slice(&slice);
+        padded[0..slice.len()].copy_from_slice(slice);
 
         let mut ret = [0; N];
         for i in 0..N {
@@ -1425,15 +1424,11 @@ impl<const N: usize> crate::core_::convert::From<&'static str> for Uint<N> {
     }
 }
 
-// all other impls
-// impl_mul_from!(Uint, Uint);
-
 impl<const N: usize> crate::core_::ops::Mul<Uint<N>> for Uint<N> {
     type Output = Uint<N>;
 
     fn mul(self, other: Self) -> Self::Output {
-        let bignum: Self = other.into();
-        let (result, overflow) = self.overflowing_mul(bignum);
+        let (result, overflow) = self.overflowing_mul(other);
         panic_on_overflow!(overflow);
         result
     }
@@ -1443,8 +1438,7 @@ impl<'a, const N: usize> crate::core_::ops::Mul<&'a Uint<N>> for Uint<N> {
     type Output = Uint<N>;
 
     fn mul(self, other: &'a Self) -> Self::Output {
-        let bignum: Self = (*other).into();
-        let (result, overflow) = self.overflowing_mul(bignum);
+        let (result, overflow) = self.overflowing_mul(*other);
         panic_on_overflow!(overflow);
         result
     }
@@ -1454,8 +1448,7 @@ impl<'a, const N: usize> crate::core_::ops::Mul<&'a Uint<N>> for &'a Uint<N> {
     type Output = Uint<N>;
 
     fn mul(self, other: &'a Uint<N>) -> Self::Output {
-        let bignum: Uint<N> = (*other).into();
-        let (result, overflow) = self.overflowing_mul(bignum);
+        let (result, overflow) = self.overflowing_mul(*other);
         panic_on_overflow!(overflow);
         result
     }
@@ -1465,8 +1458,7 @@ impl<'a, const N: usize> crate::core_::ops::Mul<Uint<N>> for &'a Uint<N> {
     type Output = Uint<N>;
 
     fn mul(self, other: Uint<N>) -> Self::Output {
-        let bignum: Uint<N> = other.into();
-        let (result, overflow) = self.overflowing_mul(bignum);
+        let (result, overflow) = self.overflowing_mul(other);
         panic_on_overflow!(overflow);
         result
     }
@@ -1496,7 +1488,7 @@ where
 {
     type Output = Uint<N>;
 
-    fn div(self, other: T) -> Uint<N> {
+    fn div(self, other: T) -> Self::Output {
         let other: Self = other.into();
         self.div_mod(other).0
     }
@@ -1508,7 +1500,7 @@ where
 {
     type Output = Uint<N>;
 
-    fn div(self, other: T) -> Uint<N> {
+    fn div(self, other: T) -> Self::Output {
         *self / other
     }
 }
@@ -1745,7 +1737,7 @@ impl<const N: usize> crate::core_::fmt::Display for Uint<N> {
         loop {
             let digit = (current % ten).low_u64() as u8;
             buf[i] = digit + b'0';
-            current = current / ten;
+            current /= ten;
             if current.is_zero() {
                 break;
             }
@@ -1785,3 +1777,37 @@ impl<const N: usize> crate::core_::fmt::LowerHex for Uint<N> {
         Ok(())
     }
 }
+
+// The following APIs are not in original uint version
+macro_rules! convert {
+    ($small:tt, $big:tt) => {
+        impl crate::core_::convert::From<Uint<$small>> for Uint<$big> {
+            fn from(num: Uint<$small>) -> Self {
+                let Uint::<$small>(ref arr) = num;
+                let mut arr2 = [0; $big];
+                for i in 0..$small {
+                    arr2[i] = arr[i];
+                }
+                Uint::<$big>(arr2)
+            }
+        }
+
+        impl crate::core_::convert::From<Uint<$big>> for Uint<$small> {
+            fn from(num: Uint<$big>) -> Self {
+                let Uint::<$big>(ref arr) = num;
+                let mut arr2 = [0; $small];
+                for i in 0..$small {
+                    arr2[i] = arr[i];
+                }
+                Uint::<$small>(arr2)
+            }
+        }
+    };
+}
+
+// U256 <-> U512
+convert!(4, 8);
+// U512 <-> U1024
+convert!(8, 16);
+// U1024 <-> U2048
+convert!(16, 32);

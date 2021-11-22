@@ -14,11 +14,10 @@ static_assertions = "1.0.0"
 
 
 [features]
-default = ["std"]
+default = []
 std = ["byteorder/std", "hex/std"]
 
 
 [[test]]
 name = "uint_tests"
 required-features = ["std"]
-
