@@ -50,7 +50,7 @@ enum OpCategory {
     // bool = vrs1 op vrs2
     Bool,
     // vrs1 = vrs1 op vrs2
-    AssginOp,
+    AssignOp,
 }
 
 impl From<&syn::BinOp> for OpCategory {
@@ -82,7 +82,7 @@ impl From<&syn::BinOp> for OpCategory {
             | syn::BinOp::BitAndEq(_)
             | syn::BinOp::BitOrEq(_)
             | syn::BinOp::ShlEq(_)
-            | syn::BinOp::ShrEq(_) => OpCategory::AssginOp,
+            | syn::BinOp::ShrEq(_) => OpCategory::AssignOp,
         }
     }
 }
@@ -156,12 +156,12 @@ impl CodegenContext {
                 let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length)?;
                 return Ok(quote! {(#ts)});
             }
-            _ => return Err((expr.expr.1, anyhow!("invalid top level expression"))),
+            _  => return Err((expr.expr.1, anyhow!("invalid expression, inner expression must be simple variable name or binary op"))),
         };
         if !top_level && is_assign {
             return Err((
                 expr.expr.1,
-                anyhow!("assign op in inner top level expression is forbidden"),
+                anyhow!("assign op in sub-expression is forbidden"),
             ));
         }
 
@@ -260,8 +260,9 @@ impl CodegenContext {
             }
             // The `/` operator (division)
             syn::BinOp::Div(_) => {
+                let uint_type = quote::format_ident!("U{}", bit_length);
                 quote! {
-                    #expr1.checked_div(#expr2).unwrap()
+                    #expr1.checked_div(#expr2).unwrap_or_else(|| #uint_type::max_value())
                 }
             }
             // The `%` operator (modulus)
@@ -362,8 +363,9 @@ impl CodegenContext {
             }
             // The `/=` operator
             syn::BinOp::DivEq(_) => {
+                let uint_type = quote::format_ident!("U{}", bit_length);
                 quote! {
-                    #expr1 = #expr1.checked_div(#expr2).unwrap()
+                    #expr1 = #expr1.checked_div(#expr2).unwrap_or_else(|| #uint_type::max_value())
                 }
             }
             // The `%=` operator
@@ -434,12 +436,12 @@ impl CodegenContext {
             Expression::Paren { expr: sub_expr, .. } => {
                 return self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
             }
-            _ => return Err((expr.expr.1, anyhow!("invalid top level expression"))),
+            _  => return Err((expr.expr.1, anyhow!("invalid expression, inner expression must be simple variable name or binary op"))),
         };
         if !top_level && is_assign {
             return Err((
                 expr.expr.1,
-                anyhow!("assign op in inner top level expression is forbidden"),
+                anyhow!("assign op in sub-expression is forbidden"),
             ));
         }
 
@@ -474,12 +476,12 @@ impl CodegenContext {
         };
         if self.v_config.as_ref() != Some(&v_config) {
             self.v_config = Some(v_config);
-            let [b0, b1, b2, b3] = VInst::VConfig(v_config).encode_bytes();
+            let inst = VInst::VConfig(v_config);
+            let [b0, b1, b2, b3] = inst.encode_bytes();
             if self.show_asm {
-                // TODO: use to_string()
-                let comment = format!("{:?}", v_config);
+                let comment = format!("{} - {}", inst.encode_u32(), inst);
                 tokens.extend(Some(quote! {
-                    let _ = concat!(#comment);
+                    let _ = #comment;
                 }));
             }
             let ts = quote! {
@@ -506,6 +508,7 @@ impl CodegenContext {
                             anyhow!("not enough V register for this expression"),
                         )
                     })?;
+                    // FIXME: t0 register may already used by Rust code
                     let inst = VInst::VleV {
                         width: bit_length,
                         vd: VReg::from_u8(vreg),
@@ -514,10 +517,9 @@ impl CodegenContext {
                     };
                     let [b0, b1, b2, b3] = inst.encode_bytes();
                     if self.show_asm {
-                        // TODO: use VInst::to_string()
-                        let comment = format!("{:?}", inst);
+                        let comment = format!("{} - {}", inst.encode_u32(), inst);
                         tokens.extend(Some(quote! {
-                            let _ = concat!(#comment);
+                            let _ = #comment;
                         }));
                     }
                     let ts = quote! {
@@ -525,7 +527,7 @@ impl CodegenContext {
                             asm!(
                                 "mv t0, {0}",
                                 ".byte {1}, {2}, {3}, {4}",
-                                in(reg) #var_ident.to_le_bytes().as_ptr(),
+                                in(reg) #var_ident.as_ref().as_ptr(),
                                 const #b0, const #b1, const #b2, const #b3,
                             )
                         }
@@ -554,7 +556,7 @@ impl CodegenContext {
                 self.expr_regs.insert(expr.id, dvreg);
                 dvreg
             }
-            OpCategory::AssginOp => svreg1,
+            OpCategory::AssignOp => svreg1,
         };
         let ivv = Ivv {
             vd: VReg::from_u8(dvreg),
@@ -563,7 +565,7 @@ impl CodegenContext {
             vm: false,
         };
         let inst = match op {
-            // ==== OpCategory::Binary | OpCategory::AssginOp ====
+            // ==== OpCategory::Binary | OpCategory::AssignOp ====
             // The `+` operator (addition)
             // The `+=` operator
             syn::BinOp::Add(_) | syn::BinOp::AddEq(_) => VInst::VaddVv(ivv),
@@ -616,10 +618,9 @@ impl CodegenContext {
         };
         let [b0, b1, b2, b3] = inst.encode_bytes();
         if self.show_asm {
-            // TODO: use to_string()
-            let comment = format!("{:?}", inst);
+            let comment = format!("{} - {}", inst, inst.encode_u32());
             tokens.extend(Some(quote! {
-                let _ = concat!(#comment);
+                let _ = #comment;
             }));
         }
         let ts = quote! {
@@ -636,45 +637,79 @@ impl CodegenContext {
             }
         }
 
-        // FIXME: handle OpCategory::Bool
-        //   1. add vfirst.m asm
-        //   2. add label for jump
-        if top_level && !is_assign {
-            let vreg = *self.expr_regs.get(&expr.id).unwrap();
-            let inst = VInst::VseV {
-                width: bit_length,
-                vs3: VReg::from_u8(vreg),
-                rs1: XReg::T0,
-                vm: false,
-            };
-            let [b0, b1, b2, b3] = inst.encode_bytes();
-            if self.show_asm {
-                // TODO: use to_string()
-                let comment = format!("{:?}", inst);
-                tokens.extend(Some(quote! {
-                    let _ = concat!(#comment);
-                }));
-            }
-            tokens.extend(Some(quote! {
-                let mut tmp_rvv_vector_buf = [0u8; 32];
-                unsafe {
-                    asm!(
-                        "mv t0, {0}",
-                        // This should be vse{256, 512, 1024}
-                        ".byte {1}, {2}, {3}, {4}",
-                        in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                        const #b0, const #b1, const #b2, const #b3,
-                    )
+        match op_category {
+            OpCategory::Binary if top_level => {
+                let vreg = *self.expr_regs.get(&expr.id).unwrap();
+                let inst = VInst::VseV {
+                    width: bit_length,
+                    vs3: VReg::from_u8(vreg),
+                    rs1: XReg::T0,
+                    vm: false,
                 };
-                U256::from_little_endian(&tmp_rvv_vector_buf[..])
-            }));
-            let mut rv = TokenStream::new();
-            token::Brace::default().surround(&mut rv, |inner| {
-                inner.extend(Some(tokens));
-            });
-            Ok(rv)
-        } else {
-            Ok(tokens)
+                let [b0, b1, b2, b3] = inst.encode_bytes();
+                if self.show_asm {
+                    let comment = format!("{} - {}", inst, inst.encode_u32());
+                    tokens.extend(Some(quote! {
+                        let _ = #comment;
+                    }));
+                }
+                let uint_type = quote::format_ident!("U{}", bit_length);
+                tokens.extend(Some(quote! {
+                    let mut tmp_rvv_vector_buf = [0u8; #bit_length as usize / 8];
+                    unsafe {
+                        asm!(
+                            "mv t0, {0}",
+                            // This should be vse{256, 512, 1024}
+                            ".byte {1}, {2}, {3}, {4}",
+                            in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
+                            const #b0, const #b1, const #b2, const #b3,
+                        )
+                    };
+                    #uint_type::from_little_endian(&tmp_rvv_vector_buf[..])
+                }));
+                let mut rv = TokenStream::new();
+                token::Brace::default().surround(&mut rv, |inner| {
+                    inner.extend(Some(tokens));
+                });
+                Ok(rv)
+            }
+            OpCategory::Binary | OpCategory::AssignOp => Ok(tokens),
+            OpCategory::Bool => {
+                let vreg = *self.expr_regs.get(&expr.id).unwrap();
+                let inst = VInst::VfirstM {
+                    rd: XReg::T0,
+                    vs2: VReg::from_u8(vreg),
+                    vm: false,
+                };
+                let [b0, b1, b2, b3] = inst.encode_bytes();
+                if self.show_asm {
+                    let comment = format!("{} - {}", inst, inst.encode_u32());
+                    tokens.extend(Some(quote! {
+                        let _ = #comment;
+                        let _ = "mv {tmp_rv_t0} t0";
+                    }));
+                }
+                tokens.extend(Some(quote! {
+                    let mut tmp_rv_t0: i64;
+                    // t0: 0  (vms* success)
+                    // t0: -1 (not found)
+                    unsafe {
+                        asm!(
+                            // This should be vfirst.m t0, vrs2
+                            ".byte {0}, {1}, {2}, {3}",
+                            "mv {4}, t0",
+                            const #b0, const #b1, const #b2, const #b3,
+                            out (reg) tmp_rv_t0,
+                        )
+                    };
+                    tmp_rv_t0 == 0
+                }));
+                let mut rv = TokenStream::new();
+                token::Brace::default().surround(&mut rv, |inner| {
+                    inner.extend(Some(tokens));
+                });
+                Ok(rv)
+            }
         }
     }
 }
@@ -1268,7 +1303,7 @@ mod test {
         let input = quote! {
             fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
                 let x_bytes = x.to_le_bytes();
-                let j = x + (z * y);
+                let j = x + (z * y / w);
                 if x > y && y == z {
                     z = x & (z | y);
                 }
@@ -1281,6 +1316,8 @@ mod test {
                 z += y;
                 z %= y;
                 z >>= y;
+                let zero = U256::zero();
+                z /= zero;
                 z
             }
         };
@@ -1289,30 +1326,173 @@ mod test {
         println!("[otuput]: {}", output);
 
         #[cfg(feature = "simulator")]
-        {
-            let expected_output = quote! {
-                fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
-                    let x_bytes = x.to_le_bytes();
-                    let j = x.overflowing_add((z.overflowing_mul(y).0)).0;
-                    if x > y && y == z {
-                        z = x & (z | y);
-                    }
-                    z = (x.overflowing_sub(y).0).overflowing_mul(x).0;
-                    let abc = 3456;
-                    z = (y
-                         .overflowing_add(j.overflowing_mul((y.overflowing_sub(x).0)).0)
-                         .0);
-                    z = z.overflowing_add(z).0;
-                    z = z.overflowing_sub(y).0;
-                    z = z.overflowing_mul(y).0;
-                    z = z.overflowing_add(y).0;
-                    z %= y;
-                    z >>= y;
-                    z
+        let expected_output = quote! {
+            fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
+                let x_bytes = x.to_le_bytes();
+                let j = x
+                    .overflowing_add(
+                        (z.overflowing_mul(y)
+                         .0
+                         .checked_div(w)
+                         .unwrap_or_else(|| U256::max_value())))
+                    .0;
+                if x > y && y == z {
+                    z = x & (z | y);
                 }
-            };
-            assert_eq!(output.to_string(), expected_output.to_string());
-        }
+                z = (x.overflowing_sub(y).0).overflowing_mul(x).0;
+                let abc = 3456;
+                z = (y
+                     .overflowing_add(j.overflowing_mul((y.overflowing_sub(x).0)).0)
+                     .0);
+                z = z.overflowing_add(z).0;
+                z = z.overflowing_sub(y).0;
+                z = z.overflowing_mul(y).0;
+                z = z.overflowing_add(y).0;
+                z %= y;
+                z >>= y;
+                let zero = U256::zero();
+                z = z.checked_div(zero).unwrap_or_else(|| U256::max_value());
+                z
+            }
+        };
+
+        #[cfg(not(feature = "simulator"))]
+        let expected_output = quote! {
+            fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
+                let x_bytes = x.to_le_bytes();
+                let j = {
+                    unsafe {
+                        asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 14u8 ,)
+                    }
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 208u8, const 2u8, const 16u8 ,)
+                    }
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) z.to_le_bytes ().as_ptr (), const 135u8, const 208u8, const 2u8, const 16u8 ,)
+                    }
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 7u8, const 209u8, const 2u8, const 16u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 129u8, const 32u8, const 148u8 ,)
+                    }
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) w.to_le_bytes ().as_ptr (), const 7u8, const 210u8, const 2u8, const 16u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 130u8, const 65u8, const 128u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 3u8, const 80u8, const 0u8 ,)
+                    }
+                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 211u8, const 2u8, const 16u8 ,)
+                    };
+                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                };
+                if {
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 3u8, const 1u8, const 104u8 ,)
+                    }
+                    let mut tmp_rv_t0: i64;
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", "mv {4}, t0", const 215u8, const 162u8, const 120u8, const 64u8, out (reg) tmp_rv_t0 ,)
+                    };
+                    tmp_rv_t0 == 0
+                } && {
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 4u8, const 17u8, const 96u8 ,)
+                    }
+                    let mut tmp_rv_t0: i64;
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", "mv {4}, t0", const 215u8, const 162u8, const 136u8, const 64u8, out (reg) tmp_rv_t0 ,)
+                    };
+                    tmp_rv_t0 == 0
+                } {
+                    z = {
+                        unsafe {
+                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 132u8, const 32u8, const 40u8 ,)
+                        }
+                        unsafe {
+                            asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 5u8, const 144u8, const 36u8 ,)
+                        }
+                        let mut tmp_rvv_vector_buf = [0u8; 32];
+                        unsafe {
+                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 213u8, const 2u8, const 16u8 ,)
+                        };
+                        U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                    };
+                }
+                z = {
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 5u8, const 32u8, const 8u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 134u8, const 5u8, const 148u8 ,)
+                    }
+                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 214u8, const 2u8, const 16u8 ,)
+                    };
+                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                };
+                let abc = 3456;
+                z = ({
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) j.to_le_bytes ().as_ptr (), const 135u8, const 214u8, const 2u8, const 16u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 7u8, const 1u8, const 8u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 135u8, const 230u8, const 148u8 ,)
+                    }
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 8u8, const 241u8, const 0u8 ,)
+                    }
+                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 216u8, const 2u8, const 16u8 ,)
+                    };
+                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                });
+                z = {
+                    unsafe {
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 136u8, const 16u8, const 0u8 ,)
+                    }
+                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    unsafe {
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 216u8, const 2u8, const 16u8 ,)
+                    };
+                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                };
+                unsafe {
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 8u8 ,)
+                };
+                unsafe {
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 148u8 ,)
+                };
+                unsafe {
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 0u8 ,)
+                };
+                unsafe {
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 136u8 ,)
+                };
+                unsafe {
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 160u8 ,)
+                };
+                let zero = U256::zero();
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) zero.to_le_bytes ().as_ptr (), const 7u8, const 217u8, const 2u8, const 16u8 ,)
+                }
+                unsafe {
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 129u8 ,)
+                };
+                z
+            }
+        };
+        assert_eq!(output.to_string(), expected_output.to_string());
     }
 
     #[test]

@@ -9,6 +9,6 @@ ckb-std = "0.9.0"
 rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
 
 [features]
-default = ["use_rvv_vector", "simulator"]
+default = ["use_rvv_vector"]
 use_rvv_vector = []
 simulator = ["rvv/simulator"]

@@ -1,3 +1,5 @@
+use std::fmt;
+
 // 7 bit
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Vtypei(u8);
@@ -7,6 +9,17 @@ pub struct Uimm(u8);
 // 5 bit
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Imm(u8);
+
+impl fmt::Display for Uimm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl fmt::Display for Imm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
@@ -25,6 +38,36 @@ pub enum Vlmul {
     M4 = 0b010,
     // LMUL=8
     M8 = 0b011,
+}
+
+impl Vlmul {
+    pub fn from_u8(value: u8) -> Vlmul {
+        match value {
+            0b101 => Vlmul::Mf8,
+            0b110 => Vlmul::Mf4,
+            0b111 => Vlmul::Mf2,
+            0b000 => Vlmul::M1,
+            0b001 => Vlmul::M2,
+            0b010 => Vlmul::M4,
+            0b011 => Vlmul::M8,
+            _ => panic!("invalid vlmul value: {}", value),
+        }
+    }
+}
+
+impl fmt::Display for Vlmul {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let vlmul_str = match self {
+            Vlmul::Mf8 => "mf8",
+            Vlmul::Mf4 => "mf4",
+            Vlmul::Mf2 => "mf2",
+            Vlmul::M1 => "m1",
+            Vlmul::M2 => "m2",
+            Vlmul::M4 => "m4",
+            Vlmul::M8 => "m8",
+        };
+        write!(f, "{}", vlmul_str)
+    }
 }
 
 impl Vtypei {
@@ -49,6 +92,43 @@ impl Vtypei {
             value |= 1 << 7;
         }
         Vtypei(value)
+    }
+
+    pub fn sew(&self) -> u16 {
+        let vsew = (self.0 & 0b111000) >> 3;
+        match vsew {
+            0 => 8,
+            1 => 16,
+            2 => 32,
+            3 => 64,
+            4 => 128,
+            5 => 256,
+            6 => 512,
+            7 => 1024,
+            _ => panic!("Invalid vsew value for vtypei: {}", vsew),
+        }
+    }
+    pub fn lmul(&self) -> Vlmul {
+        Vlmul::from_u8(self.0 & 0b111)
+    }
+    pub fn ta(&self) -> bool {
+        (self.0 & (1 << 6)) != 0
+    }
+    pub fn ma(&self) -> bool {
+        (self.0 & (1 << 7)) != 0
+    }
+}
+
+impl fmt::Display for Vtypei {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut output = format!("e{}, {}", self.sew(), self.lmul());
+        if self.ta() {
+            output = format!("{}, ta", output);
+        }
+        if self.ma() {
+            output = format!("{}, ma", output);
+        }
+        write!(f, "{}", output)
     }
 }
 
@@ -127,6 +207,46 @@ pub enum XReg {
     T6,
 }
 
+impl fmt::Display for XReg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let xreg_str = match self {
+            XReg::Zero => "zero",
+            XReg::Ra => "ra",
+            XReg::Sp => "sp",
+            XReg::Gp => "gp",
+            XReg::Tp => "tp",
+            XReg::T0 => "t0",
+            XReg::T1 => "t1",
+            XReg::T2 => "t2",
+            XReg::S0 => "s0",
+            XReg::S1 => "s1",
+            XReg::A0 => "a0",
+            XReg::A1 => "a1",
+            XReg::A2 => "a2",
+            XReg::A3 => "a3",
+            XReg::A4 => "a4",
+            XReg::A5 => "a5",
+            XReg::A6 => "a6",
+            XReg::A7 => "a7",
+            XReg::S2 => "s2",
+            XReg::S3 => "s3",
+            XReg::S4 => "s4",
+            XReg::S5 => "s5",
+            XReg::S6 => "s6",
+            XReg::S7 => "s7",
+            XReg::S8 => "s8",
+            XReg::S9 => "s9",
+            XReg::S10 => "s10",
+            XReg::S11 => "s11",
+            XReg::T3 => "t3",
+            XReg::T4 => "t4",
+            XReg::T5 => "t5",
+            XReg::T6 => "t6",
+        };
+        write!(f, "{}", xreg_str)
+    }
+}
+
 // 5 bit
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
@@ -163,6 +283,46 @@ pub enum VReg {
     V29,
     V30,
     V31,
+}
+
+impl fmt::Display for VReg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let vreg_str = match self {
+            VReg::V0 => "v0",
+            VReg::V1 => "v1",
+            VReg::V2 => "v2",
+            VReg::V3 => "v3",
+            VReg::V4 => "v4",
+            VReg::V5 => "v5",
+            VReg::V6 => "v6",
+            VReg::V7 => "v7",
+            VReg::V8 => "v8",
+            VReg::V9 => "v9",
+            VReg::V10 => "v10",
+            VReg::V11 => "v11",
+            VReg::V12 => "v12",
+            VReg::V13 => "v13",
+            VReg::V14 => "v14",
+            VReg::V15 => "v15",
+            VReg::V16 => "v16",
+            VReg::V17 => "v17",
+            VReg::V18 => "v18",
+            VReg::V19 => "v19",
+            VReg::V20 => "v20",
+            VReg::V21 => "v21",
+            VReg::V22 => "v22",
+            VReg::V23 => "v23",
+            VReg::V24 => "v24",
+            VReg::V25 => "v25",
+            VReg::V26 => "v26",
+            VReg::V27 => "v27",
+            VReg::V28 => "v28",
+            VReg::V29 => "v29",
+            VReg::V30 => "v30",
+            VReg::V31 => "v31",
+        };
+        write!(f, "{}", vreg_str)
+    }
 }
 
 impl VReg {
@@ -228,7 +388,35 @@ pub struct Ivi {
     pub vm: bool,
 }
 
-// Vector Arithmetic Instruction
+impl fmt::Display for Ivv {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut output = format!("{}, {}, {}", self.vd, self.vs2, self.vs1);
+        if self.vm {
+            output = format!("{}, vm", output);
+        }
+        write!(f, "{}", output)
+    }
+}
+impl fmt::Display for Ivx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut output = format!("{}, {}, {}", self.vd, self.vs2, self.rs1);
+        if self.vm {
+            output = format!("{}, vm", output);
+        }
+        write!(f, "{}", output)
+    }
+}
+impl fmt::Display for Ivi {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut output = format!("{}, {}, {}", self.vd, self.vs2, self.imm);
+        if self.vm {
+            output = format!("{}, vm", output);
+        }
+        write!(f, "{}", output)
+    }
+}
+
+// vector Arithmetic Instruction
 fn encode_vai(dst: u8, funct3: u8, src1: u8, src2: u8, vm: bool, funct6: u8) -> u32 {
     let mut value = op::V;
     value = set_bits(value, OFFSET_DST, dst as u32);
@@ -243,10 +431,10 @@ fn encode_vai(dst: u8, funct3: u8, src1: u8, src2: u8, vm: bool, funct6: u8) -> 
 }
 
 impl Ivv {
-    fn encode_u32(&self, funct6: u8) -> u32 {
+    fn encode_u32(&self, funct6: u8, funct3: u8) -> u32 {
         encode_vai(
             self.vd as u8,
-            funct3::OPIVV,
+            funct3,
             self.vs1 as u8,
             self.vs2 as u8,
             self.vm,
@@ -255,10 +443,10 @@ impl Ivv {
     }
 }
 impl Ivx {
-    fn encode_u32(&self, funct6: u8) -> u32 {
+    fn encode_u32(&self, funct6: u8, funct3: u8) -> u32 {
         encode_vai(
             self.vd as u8,
-            funct3::OPIVX,
+            funct3,
             self.rs1 as u8,
             self.vs2 as u8,
             self.vm,
@@ -291,6 +479,22 @@ pub enum VConfig {
     },
     /// vsetvl   rd, rs1, rs2     # rd = new vl, rs1 = AVL, rs2 = new vtype value
     Vsetvl { rd: XReg, rs1: XReg, rs2: XReg },
+}
+
+impl fmt::Display for VConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VConfig::Vsetvli { rd, rs1, vtypei } => {
+                write!(f, "vsetvl {}, {}, {}", rd, rs1, vtypei)
+            }
+            VConfig::Vsetivli { rd, uimm, vtypei } => {
+                write!(f, "vsetivli {}, {}, {}", rd, uimm, vtypei)
+            }
+            VConfig::Vsetvl { rd, rs1, rs2 } => {
+                write!(f, "vsetvl {}, {}, {}", rd, rs1, rs2)
+            }
+        }
+    }
 }
 
 // 32 bit
@@ -518,60 +722,60 @@ impl VInst {
         let (base, rest, src1, funct3, dst) = match self {
             // ==== Vector Integer Arithmetic Instructions ====
             VInst::VaddVv(ivv) => {
-                return ivv.encode_u32(funct6::VADD);
+                return ivv.encode_u32(funct6::VADD, funct3::OPIVV);
             }
             VInst::VaddVx(ivx) => {
-                return ivx.encode_u32(funct6::VADD);
+                return ivx.encode_u32(funct6::VADD, funct3::OPIVX);
             }
             VInst::VaddVi(ivi) => {
                 return ivi.encode_u32(funct6::VADD);
             }
             VInst::VsubVv(ivv) => {
-                return ivv.encode_u32(funct6::VSUB);
+                return ivv.encode_u32(funct6::VSUB, funct3::OPIVV);
             }
             VInst::VsubVx(ivx) => {
-                return ivx.encode_u32(funct6::VSUB);
+                return ivx.encode_u32(funct6::VSUB, funct3::OPIVX);
             }
             VInst::VrsubVx(ivx) => {
-                return ivx.encode_u32(funct6::VRSUB);
+                return ivx.encode_u32(funct6::VRSUB, funct3::OPIVX);
             }
             VInst::VrsubVi(ivi) => {
                 return ivi.encode_u32(funct6::VRSUB);
             }
             VInst::VmulVv(ivv) => {
-                return ivv.encode_u32(funct6::VMUL);
+                return ivv.encode_u32(funct6::VMUL, funct3::OPMVV);
             }
             VInst::VmulVx(ivx) => {
-                return ivx.encode_u32(funct6::VMUL);
+                return ivx.encode_u32(funct6::VMUL, funct3::OPMVX);
             }
             VInst::VdivuVv(ivv) => {
-                return ivv.encode_u32(funct6::VDIVU);
+                return ivv.encode_u32(funct6::VDIVU, funct3::OPMVV);
             }
             VInst::VdivuVx(ivx) => {
-                return ivx.encode_u32(funct6::VDIVU);
+                return ivx.encode_u32(funct6::VDIVU, funct3::OPMVX);
             }
             VInst::VremuVv(ivv) => {
-                return ivv.encode_u32(funct6::VREMU);
+                return ivv.encode_u32(funct6::VREMU, funct3::OPMVV);
             }
             VInst::VremuVx(ivx) => {
-                return ivx.encode_u32(funct6::VREMU);
+                return ivx.encode_u32(funct6::VREMU, funct3::OPMVX);
             }
 
             // ==== Vector Single-Width Bit Shift Instructions ====
             VInst::VsllVv(ivv) => {
-                return ivv.encode_u32(funct6::VSLL);
+                return ivv.encode_u32(funct6::VSLL, funct3::OPIVV);
             }
             VInst::VsllVx(ivx) => {
-                return ivx.encode_u32(funct6::VSLL);
+                return ivx.encode_u32(funct6::VSLL, funct3::OPIVX);
             }
             VInst::VsllVi(ivi) => {
                 return ivi.encode_u32(funct6::VSLL);
             }
             VInst::VsrlVv(ivv) => {
-                return ivv.encode_u32(funct6::VSRL);
+                return ivv.encode_u32(funct6::VSRL, funct3::OPIVV);
             }
             VInst::VsrlVx(ivx) => {
-                return ivx.encode_u32(funct6::VSRL);
+                return ivx.encode_u32(funct6::VSRL, funct3::OPIVX);
             }
             VInst::VsrlVi(ivi) => {
                 return ivi.encode_u32(funct6::VSRL);
@@ -579,28 +783,28 @@ impl VInst {
 
             // ==== Vector Bitwise Logical Instructions ====
             VInst::VandVv(ivv) => {
-                return ivv.encode_u32(funct6::VAND);
+                return ivv.encode_u32(funct6::VAND, funct3::OPIVV);
             }
             VInst::VandVx(ivx) => {
-                return ivx.encode_u32(funct6::VAND);
+                return ivx.encode_u32(funct6::VAND, funct3::OPIVX);
             }
             VInst::VandVi(ivi) => {
                 return ivi.encode_u32(funct6::VAND);
             }
             VInst::VorVv(ivv) => {
-                return ivv.encode_u32(funct6::VOR);
+                return ivv.encode_u32(funct6::VOR, funct3::OPIVV);
             }
             VInst::VorVx(ivx) => {
-                return ivx.encode_u32(funct6::VOR);
+                return ivx.encode_u32(funct6::VOR, funct3::OPIVX);
             }
             VInst::VorVi(ivi) => {
                 return ivi.encode_u32(funct6::VOR);
             }
             VInst::VxorVv(ivv) => {
-                return ivv.encode_u32(funct6::VXOR);
+                return ivv.encode_u32(funct6::VXOR, funct3::OPIVV);
             }
             VInst::VxorVx(ivx) => {
-                return ivx.encode_u32(funct6::VXOR);
+                return ivx.encode_u32(funct6::VXOR, funct3::OPIVX);
             }
             VInst::VxorVi(ivi) => {
                 return ivi.encode_u32(funct6::VXOR);
@@ -608,34 +812,34 @@ impl VInst {
 
             // ==== Vector Integer Comparison Instructions ====
             VInst::VmseqVv(ivv) => {
-                return ivv.encode_u32(funct6::VMSEQ);
+                return ivv.encode_u32(funct6::VMSEQ, funct3::OPIVV);
             }
             VInst::VmseqVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSEQ);
+                return ivx.encode_u32(funct6::VMSEQ, funct3::OPIVX);
             }
             VInst::VmseqVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSEQ);
             }
             VInst::VmsneVv(ivv) => {
-                return ivv.encode_u32(funct6::VMSNE);
+                return ivv.encode_u32(funct6::VMSNE, funct3::OPIVV);
             }
             VInst::VmsneVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSNE);
+                return ivx.encode_u32(funct6::VMSNE, funct3::OPIVX);
             }
             VInst::VmsneVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSNE);
             }
             VInst::VmsltuVv(ivv) => {
-                return ivv.encode_u32(funct6::VMSLTU);
+                return ivv.encode_u32(funct6::VMSLTU, funct3::OPIVV);
             }
             VInst::VmsltuVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSLTU);
+                return ivx.encode_u32(funct6::VMSLTU, funct3::OPIVX);
             }
             VInst::VmsleuVv(ivv) => {
-                return ivv.encode_u32(funct6::VMSLEU);
+                return ivv.encode_u32(funct6::VMSLEU, funct3::OPIVV);
             }
             VInst::VmsleuVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSLEU);
+                return ivx.encode_u32(funct6::VMSLEU, funct3::OPIVX);
             }
             VInst::VmsleuVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSLEU);
@@ -650,7 +854,7 @@ impl VInst {
                 .encode_u32();
             }
             VInst::VmsgtuVx(ivx) => {
-                return ivx.encode_u32(funct6::VMSGTU);
+                return ivx.encode_u32(funct6::VMSGTU, funct3::OPIVX);
             }
             VInst::VmsgtuVi(ivi) => {
                 return ivi.encode_u32(funct6::VMSGTU);
@@ -736,6 +940,178 @@ impl VInst {
 
     pub fn encode_bytes(self) -> [u8; 4] {
         self.encode_u32().to_le_bytes()
+    }
+}
+
+impl fmt::Display for VInst {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // ==== Vector Integer Arithmetic Instructions ====
+            VInst::VaddVv(ivv) => {
+                write!(f, "vadd.vv {}", ivv)
+            }
+            VInst::VaddVx(ivx) => {
+                write!(f, "vadd.vx {}", ivx)
+            }
+            VInst::VaddVi(ivi) => {
+                write!(f, "vadd.vi {}", ivi)
+            }
+            VInst::VsubVv(ivv) => {
+                write!(f, "vsub.vv {}", ivv)
+            }
+            VInst::VsubVx(ivx) => {
+                write!(f, "vsub.vx {}", ivx)
+            }
+            VInst::VrsubVx(ivx) => {
+                write!(f, "vrsub.vx {}", ivx)
+            }
+            VInst::VrsubVi(ivi) => {
+                write!(f, "vrsub.vi {}", ivi)
+            }
+            VInst::VmulVv(ivv) => {
+                write!(f, "vmul.vv {}", ivv)
+            }
+            VInst::VmulVx(ivx) => {
+                write!(f, "vmul.vx {}", ivx)
+            }
+            VInst::VdivuVv(ivv) => {
+                write!(f, "vdivu.vv {}", ivv)
+            }
+            VInst::VdivuVx(ivx) => {
+                write!(f, "vdivu.vx {}", ivx)
+            }
+            VInst::VremuVv(ivv) => {
+                write!(f, "vremu.vv {}", ivv)
+            }
+            VInst::VremuVx(ivx) => {
+                write!(f, "vremu.vx {}", ivx)
+            }
+
+            // ==== Vector Single-Width Bit Shift Instructions ====
+            VInst::VsllVv(ivv) => {
+                write!(f, "vsll.vv {}", ivv)
+            }
+            VInst::VsllVx(ivx) => {
+                write!(f, "vsll.vx {}", ivx)
+            }
+            VInst::VsllVi(ivi) => {
+                write!(f, "vsll.vi {}", ivi)
+            }
+            VInst::VsrlVv(ivv) => {
+                write!(f, "vsrl.vv {}", ivv)
+            }
+            VInst::VsrlVx(ivx) => {
+                write!(f, "vsrl.vx {}", ivx)
+            }
+            VInst::VsrlVi(ivi) => {
+                write!(f, "vsrl.vi {}", ivi)
+            }
+
+            // ==== Vector Bitwise Logical Instructions ====
+            VInst::VandVv(ivv) => {
+                write!(f, "vand.vv {}", ivv)
+            }
+            VInst::VandVx(ivx) => {
+                write!(f, "vand.vx {}", ivx)
+            }
+            VInst::VandVi(ivi) => {
+                write!(f, "vand.vi {}", ivi)
+            }
+            VInst::VorVv(ivv) => {
+                write!(f, "vor.vv {}", ivv)
+            }
+            VInst::VorVx(ivx) => {
+                write!(f, "vor.vx {}", ivx)
+            }
+            VInst::VorVi(ivi) => {
+                write!(f, "vor.vi {}", ivi)
+            }
+            VInst::VxorVv(ivv) => {
+                write!(f, "vxor.vv {}", ivv)
+            }
+            VInst::VxorVx(ivx) => {
+                write!(f, "vxor.vx {}", ivx)
+            }
+            VInst::VxorVi(ivi) => {
+                write!(f, "vxor.vi {}", ivi)
+            }
+
+            // ==== Vector Integer Comparison Instructions ====
+            VInst::VmseqVv(ivv) => {
+                write!(f, "vmseq.vv {}", ivv)
+            }
+            VInst::VmseqVx(ivx) => {
+                write!(f, "vmseq.vx {}", ivx)
+            }
+            VInst::VmseqVi(ivi) => {
+                write!(f, "vmseq.vi {}", ivi)
+            }
+            VInst::VmsneVv(ivv) => {
+                write!(f, "vmsne.vv {}", ivv)
+            }
+            VInst::VmsneVx(ivx) => {
+                write!(f, "vmsne.vx {}", ivx)
+            }
+            VInst::VmsneVi(ivi) => {
+                write!(f, "vmsne.vi {}", ivi)
+            }
+            VInst::VmsltuVv(ivv) => {
+                write!(f, "vmsltu.vv {}", ivv)
+            }
+            VInst::VmsltuVx(ivx) => {
+                write!(f, "vmsltu.vx {}", ivx)
+            }
+            VInst::VmsleuVv(ivv) => {
+                write!(f, "vmsleu.vv {}", ivv)
+            }
+            VInst::VmsleuVx(ivx) => {
+                write!(f, "vmsleu.vx {}", ivx)
+            }
+            VInst::VmsleuVi(ivi) => {
+                write!(f, "vmsleu.vi {}", ivi)
+            }
+            VInst::VmsgtuVv(ivv) => {
+                write!(f, "vmsgtu.vv {}", ivv)
+            }
+            VInst::VmsgtuVx(ivx) => {
+                write!(f, "vmsgtu.vx {}", ivx)
+            }
+            VInst::VmsgtuVi(ivi) => {
+                write!(f, "vmsgtu.vi {}", ivi)
+            }
+            VInst::VmsgeuVv(ivv) => {
+                write!(f, "vmsgeu.vv {}", ivv)
+            }
+            VInst::VfirstM { rd, vs2, vm } => {
+                let mut output = format!("{}, {}", rd, vs2);
+                if *vm {
+                    output = format!("{}, vm", output);
+                }
+                write!(f, "vfirst.m {}", output)
+            }
+            VInst::VConfig(cfg) => {
+                write!(f, "{}", cfg)
+            }
+            VInst::VleV { width, vd, rs1, vm } => {
+                let mut output = format!("{}, ({})", vd, rs1);
+                if *vm {
+                    output = format!("{}, vm", output);
+                }
+                write!(f, "vle{}.v {}", width, output)
+            }
+            VInst::VseV {
+                width,
+                vs3,
+                rs1,
+                vm,
+            } => {
+                let mut output = format!("{}, ({})", vs3, rs1);
+                if *vm {
+                    output = format!("{}, vm", output);
+                }
+                write!(f, "vse{}.v {}", width, output)
+            }
+        }
     }
 }
 
