@@ -543,8 +543,8 @@ impl CodegenContext {
         }
 
         let op_category = OpCategory::from(op);
-        let svreg1 = *self.expr_regs.get(&left.id).unwrap();
-        let svreg2 = *self.expr_regs.get(&right.id).unwrap();
+        let svreg2 = *self.expr_regs.get(&left.id).unwrap();
+        let svreg1 = *self.expr_regs.get(&right.id).unwrap();
         let dvreg = match op_category {
             OpCategory::Binary | OpCategory::Bool => {
                 let dvreg = self.v_registers.next_register().ok_or_else(|| {
