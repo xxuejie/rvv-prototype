@@ -1,2 +1,2 @@
 [workspace]
-members = ["example", "rvv", "assembler", "mont-example", "bn128-example"]
+members = ["example", "rvv", "assembler", "mont-example", "bn128-example", "rvv-simulator-runtime"]

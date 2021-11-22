@@ -7,8 +7,7 @@
 #![feature(panic_info_message)]
 
 extern crate rvv;
-use ckb_std::{debug, default_alloc};
-use rvv::rvv_vector;
+use ckb_std::default_alloc;
 
 ckb_std::entry!(program_entry);
 default_alloc!();
