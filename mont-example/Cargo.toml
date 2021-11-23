@@ -1,7 +1,13 @@
+[workspace]
+
 [package]
 name = "rvv-mont-example"
 version = "0.1.0"
 edition = "2018"
+
+# this configuration is very important to CKB-VM
+[profile.release]
+lto = "fat"
 
 [dependencies]
 rvv = { path = "../rvv" }
