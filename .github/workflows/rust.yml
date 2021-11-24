@@ -15,11 +15,7 @@ jobs:
         git clone -b rvv https://github.com/mohanson/ckb-standalone-debugger
         cd ckb-standalone-debugger/bins
         cargo install --path . -f
-    - name: Run mont-example rvv_vector tests
+    - name: Run mont-example simulator/rvv-asm tests
       run: |
-        docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd mont-example && make rvv_vector'
-        cd mont-example && make run
-    - name: Run mont-example simulator tests
-      run: |
-        docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd mont-example && make simulator'
+        docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd mont-example && make build'
         cd mont-example && make run
