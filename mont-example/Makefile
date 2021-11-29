@@ -1,4 +1,4 @@
-CKB_DEBUGGER := ckb-debugger-rvv
+CKB_DEBUGGER ?= ckb-debugger-rvv
 
 
 simulator:
