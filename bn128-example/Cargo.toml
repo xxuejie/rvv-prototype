@@ -24,6 +24,7 @@ lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 uint = { version = "0.9.1", default-features = false }
 rvv = { path = "../rvv" }
 ckb-std = "0.9.0"
+rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
 
 
 [[bin]]

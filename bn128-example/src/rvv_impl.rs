@@ -1,37 +1,21 @@
 use rvv::rvv_vector;
-use uint::construct_uint;
+use rvv_simulator_runtime::Uint;
 
-construct_uint! {
-    pub struct U256(4);
+pub type U256 = Uint<4>;
+pub type U512 = Uint<8>;
+
+#[macro_export]
+macro_rules! U256 {
+    ($e: expr) => {
+        Uint::<4>($e)
+    };
 }
 
-construct_uint! {
-    pub struct U512(8);
-}
-
-impl From<U256> for U512 {
-    fn from(u: U256) -> Self {
-        let U256(ref arr) = u;
-        let mut val = [0; 8];
-        val[0] = arr[0];
-        val[1] = arr[1];
-        val[2] = arr[2];
-        val[3] = arr[3];
-        Self(val)
-    }
-}
-
-impl From<U512> for U256 {
-    // use it with care
-    fn from(u: U512) -> Self {
-        let U512(ref arr) = u;
-        let mut val = [0; 4];
-        val[0] = arr[0];
-        val[1] = arr[1];
-        val[2] = arr[2];
-        val[3] = arr[3];
-        Self(val)
-    }
+#[macro_export]
+macro_rules! U512 {
+    ($e: expr) => {
+        Uint::<8>($e)
+    };
 }
 
 // implemented by rvv_vector
@@ -59,6 +43,7 @@ pub fn mont_multi(np1: U256, n: U256, x: U256, y: U256, bits: usize) -> U256 {
     mont_reduce(np1, n, xy, bits)
 }
 
+#[inline(always)]
 fn from_u128pair(n: &[u128; 2]) -> U256 {
     let mut buf = [0u8; 32];
     buf[0..16].copy_from_slice(&n[0].to_le_bytes());
@@ -77,7 +62,7 @@ pub fn mul_reduce_internal(
     let y: U256 = from_u128pair(by);
     let n: U256 = from_u128pair(modulus);
     let np1: U256 = U256::from(inv_high) << 128 | U256::from(inv);
-    let U256(ref result) = mont_multi(np1, n, x, y, 256);
+    let Uint::<4>(ref result) = mont_multi(np1, n, x, y, 256);
     this[0] = result[0] as u128 | (result[1] as u128) << 64;
     this[1] = result[2] as u128 | (result[3] as u128) << 64;
 }
