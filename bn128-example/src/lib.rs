@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(asm)]
 
 pub mod arith;
 pub mod ethereum;
