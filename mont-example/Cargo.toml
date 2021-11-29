@@ -17,14 +17,20 @@ rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
 [[bin]]
 path = "src/main.rs"
 name = "mont-example-simulator"
-required-features = ["simulator"]
+required-features = ["simulator", "use_rvv_vector"]
 
 [[bin]]
 path = "src/main.rs"
 name = "mont-example-rvv-asm"
 required-features = ["use_rvv_vector"]
 
+[[bin]]
+path = "src/main.rs"
+name = "mont-example-raw"
+required-features = []
+
+
 [features]
-default = ["use_rvv_vector"]
+default = []
 use_rvv_vector = []
 simulator = ["rvv/simulator"]

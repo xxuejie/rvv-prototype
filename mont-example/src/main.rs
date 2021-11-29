@@ -9,6 +9,9 @@
 extern crate rvv;
 use ckb_std::default_alloc;
 
+use alloc::format;
+use ckb_std::syscalls::debug;
+
 ckb_std::entry!(program_entry);
 default_alloc!();
 
@@ -218,6 +221,17 @@ pub fn test() {
 }
 
 pub fn program_entry() -> i8 {
+    if cfg!(feature = "use_rvv_vector") {
+        debug(format!("feature = use_rvv_vector"));
+    } else {
+        debug(format!("feature != use_rvv_vector"));
+    }
+    if cfg!(feature = "simulator") {
+        debug(format!("feature = simulator"));
+    } else {
+        debug(format!("feature != simulator"))
+    }
+
     uint_version_test::test();
     uint_version_test::test_i512();
     uint_version_test::test_egcd();
@@ -231,5 +245,6 @@ pub fn program_entry() -> i8 {
 
     rsa_test::test_rsa();
 
+    debug(format!("done"));
     return 0;
 }

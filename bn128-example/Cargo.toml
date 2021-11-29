@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["use_rvv_vector"]
+default = []
 use_rvv_vector = []
 simulator = ["rvv/simulator"]
 
@@ -21,7 +21,7 @@ lto = "fat"
 byteorder = { version = "1.0", features = ["i128"], default-features = false }
 crunchy = "0.2.1"
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
-uint = { version = "0.9.1", default-features = false }
+#uint = { version = "0.9.1", default-features = false }
 rvv = { path = "../rvv" }
 ckb-std = "0.9.0"
 rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
@@ -30,9 +30,16 @@ rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
 [[bin]]
 path = "src/main.rs"
 name = "alt-bn128-example-simulator"
-required-features = ["simulator"]
+required-features = ["simulator", "use_rvv_vector"]
 
 [[bin]]
 path = "src/main.rs"
 name = "alt-bn128-example-rvv-asm"
 required-features = ["use_rvv_vector"]
+
+
+[[bin]]
+path = "src/main.rs"
+name = "alt-bn128-example-raw"
+required-features = []
+
