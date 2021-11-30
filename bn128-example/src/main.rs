@@ -6,12 +6,17 @@
 #![feature(panic_info_message)]
 
 extern crate rvv;
+use alt_bn128_example::rvv_impl::bench_mont;
+
 use alloc::format;
+use ckb_std::cstr_core::CStr;
 use ckb_std::{default_alloc, syscalls::debug};
+use core::slice::from_raw_parts;
+
 ckb_std::entry!(program_entry);
 default_alloc!();
 
-fn main() {
+fn internal_main() {
     // alt_bn128::ethereum::ut::test_alt_bn128_add();
     // debug!("test_alt_bn128_add     pass");
     // alt_bn128::ethereum::ut::test_alt_bn128_mul();
@@ -31,7 +36,23 @@ fn main() {
     debug(format!("test_alt_bn128_pairing pass"));
 }
 
-pub fn program_entry() -> i8 {
-    main();
+pub fn program_entry(argc: u64, argv: *const *const u8) -> i8 {
+    // for ckb-vm-pprof
+    // bench_mont();
+    // return 0;
+
+    let args = unsafe { from_raw_parts(argv, argc as usize) };
+    if argc > 0 {
+        let arg1 = unsafe { CStr::from_ptr(args[0]) };
+        let arg1 = arg1.to_str().unwrap();
+        if arg1 == "bench_mont" {
+            debug(format!("start bench_mont"));
+            bench_mont();
+            debug(format!("bench_mont done"));
+            return 0;
+        }
+    }
+
+    internal_main();
     return 0;
 }

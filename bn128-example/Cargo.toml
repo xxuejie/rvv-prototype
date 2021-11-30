@@ -16,6 +16,8 @@ simulator = ["rvv/simulator"]
 # this configuration is very important to CKB-VM
 [profile.release]
 lto = "fat"
+debug = true
+
 
 [dependencies]
 byteorder = { version = "1.0", features = ["i128"], default-features = false }
