@@ -5,10 +5,10 @@ use std::fmt;
 pub struct Vtypei(u8);
 // 5 bit
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct Uimm(u8);
+pub struct Uimm(pub u8);
 // 5 bit
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct Imm(u8);
+pub struct Imm(pub u8);
 
 impl fmt::Display for Uimm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -555,6 +555,20 @@ pub enum VInst {
     /// TODO: vrem.vv vd, vs2, vs1, vm   # Vector-vector
     /// TODO: vrem.vx vd, vs2, rs1, vm   # vector-scalar
 
+    // # Saturating adds of unsigned integers.
+    /// vsaddu.vv vd, vs2, vs1, vm   # Vector-vector
+    VsadduVv(Ivv),
+    /// vsaddu.vx vd, vs2, rs1, vm   # vector-scalar
+    VsadduVx(Ivx),
+    /// vsaddu.vi vd, vs2, imm, vm   # vector-immediate
+    VsadduVi(Ivi),
+
+    // # Saturating subtract of unsigned integers.
+    /// vssubu.vv vd, vs2, vs1, vm   # Vector-vector
+    VssubuVv(Ivv),
+    /// vssubu.vx vd, vs2, rs1, vm   # vector-scalar
+    VssubuVx(Ivx),
+
     // ==== Vector Single-Width Bit Shift Instructions ====
     // # Bit shift operations
     /// vsll.vv vd, vs2, vs1, vm   # Vector-vector
@@ -705,6 +719,8 @@ mod funct6 {
     pub(crate) const VDIV: u8 = 0b100001;
     pub(crate) const VREMU: u8 = 0b100010;
     pub(crate) const VREM: u8 = 0b100011;
+    pub(crate) const VSADDU: u8 = 0b100000;
+    pub(crate) const VSSUBU: u8 = 0b100010;
     pub(crate) const VSLL: u8 = 0b100101;
     pub(crate) const VSRL: u8 = 0b101000;
     pub(crate) const VAND: u8 = 0b001001;
@@ -759,6 +775,21 @@ impl VInst {
             }
             VInst::VremuVx(ivx) => {
                 return ivx.encode_u32(funct6::VREMU, funct3::OPMVX);
+            }
+            VInst::VsadduVv(ivv) => {
+                return ivv.encode_u32(funct6::VSADDU, funct3::OPIVV);
+            }
+            VInst::VsadduVx(ivx) => {
+                return ivx.encode_u32(funct6::VSADDU, funct3::OPIVX);
+            }
+            VInst::VsadduVi(ivi) => {
+                return ivi.encode_u32(funct6::VSADDU);
+            }
+            VInst::VssubuVv(ivv) => {
+                return ivv.encode_u32(funct6::VSSUBU, funct3::OPIVV);
+            }
+            VInst::VssubuVx(ivx) => {
+                return ivx.encode_u32(funct6::VSSUBU, funct3::OPIVX);
             }
 
             // ==== Vector Single-Width Bit Shift Instructions ====
@@ -985,6 +1016,21 @@ impl fmt::Display for VInst {
             }
             VInst::VremuVx(ivx) => {
                 write!(f, "vremu.vx {}", ivx)
+            }
+            VInst::VsadduVv(ivv) => {
+                write!(f, "vsaddu.vv {}", ivv)
+            }
+            VInst::VsadduVx(ivx) => {
+                write!(f, "vsaddu.vx {}", ivx)
+            }
+            VInst::VsadduVi(ivi) => {
+                write!(f, "vsaddu.vi {}", ivi)
+            }
+            VInst::VssubuVv(ivv) => {
+                write!(f, "vssubu.vv {}", ivv)
+            }
+            VInst::VssubuVx(ivx) => {
+                write!(f, "vssubu.vx {}", ivx)
             }
 
             // ==== Vector Single-Width Bit Shift Instructions ====
