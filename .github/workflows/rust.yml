@@ -18,9 +18,9 @@ jobs:
     - name: Run mont-example simulator/rvv-asm/raw tests
       run: |
         docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd mont-example && make build'
-        cd mont-example && CKB_DEBUGGER=ckb-debugger make run
+        cd mont-example && make run
 
     - name: Run bn128-example simulator/rvv-asm/raw tests
       run: |
         docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd bn128-example && make build'
-        cd bn128-example && CKB_DEBUGGER=ckb-debugger make run
+        cd bn128-example && make run
