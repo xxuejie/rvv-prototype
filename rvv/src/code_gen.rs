@@ -87,6 +87,7 @@ impl From<&syn::BinOp> for OpCategory {
     }
 }
 
+#[cfg(not(feature = "simulator"))]
 fn inst_codegen(tokens: &mut TokenStream, inst: VInst, show_asm: bool) {
     let [b0, b1, b2, b3] = inst.encode_bytes();
     if show_asm {
@@ -103,22 +104,7 @@ fn inst_codegen(tokens: &mut TokenStream, inst: VInst, show_asm: bool) {
     tokens.extend(Some(ts));
 }
 
-fn tmp_bool_codegen(tokens: &mut TokenStream, xreg_tn: u8) {
-    let tmp_var = quote::format_ident!("tmp_rv_t{}", xreg_tn);
-    let asm_str = format!("mv {{0}}, t{}", xreg_tn);
-    tokens.extend(Some(quote! {
-        let mut #tmp_var: i64;
-        // tn: 0  (vms* success)
-        // tn: -1 (not found)
-        unsafe {
-            asm!(
-                #asm_str,
-                out (reg) #tmp_var,
-            )
-        }
-        #tmp_var == 0
-    }));
-}
+#[cfg(not(feature = "simulator"))]
 fn overflowing_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16, show_asm: bool) {
     let inst = VInst::VseV {
         width: bit_length,
@@ -154,6 +140,8 @@ fn overflowing_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16,
         (unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) }, tmp_bool_var == 0)
     }));
 }
+
+#[cfg(not(feature = "simulator"))]
 fn checked_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16, show_asm: bool) {
     let inst = VInst::VseV {
         width: bit_length,
@@ -264,24 +252,7 @@ impl CodegenContext {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
             Expression::MethodCall { receiver, method, args, .. } => {
-                let mut tokens = TokenStream::new();
-                receiver.to_tokens(tokens, self)?;
-                token::Dot::default().to_tokens(tokens);
-                method.to_tokens(tokens);
-                catch_inner_error(|err| {
-                    token::Paren::default().surround(tokens, |inner| {
-                        for (idx, ty) in args.iter().enumerate() {
-                            if let Err(inner_err) = ty.to_tokens(inner, self) {
-                                *err = Some(inner_err);
-                                return;
-                            }
-                            if idx != args.len() - 1 {
-                                token::Comma::default().to_tokens(inner);
-                            }
-                        }
-                    });
-                })?;
-                return Ok(tokens);
+                return self.default_method_call_codegen(receiver, method, args);
             }
             Expression::Paren { expr: sub_expr, .. } => {
                 let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length)?;
@@ -551,44 +522,43 @@ impl CodegenContext {
         }
         Ok(tokens)
     }
+    fn default_method_call_codegen(
+        &mut self,
+        receiver: &TypedExpression,
+        method: &syn::Ident,
+        args: &[TypedExpression],
+    ) -> Result<TokenStream, SpannedError> {
+        let mut tokens = TokenStream::new();
+        receiver.to_tokens(&mut tokens, self)?;
+        token::Dot::default().to_tokens(&mut tokens);
+        method.to_tokens(&mut tokens);
+        catch_inner_error(|err| {
+            token::Paren::default().surround(&mut tokens, |inner| {
+                for (idx, ty) in args.iter().enumerate() {
+                    if let Err(inner_err) = ty.to_tokens(inner, self) {
+                        *err = Some(inner_err);
+                        return;
+                    }
+                    if idx != args.len() - 1 {
+                        token::Comma::default().to_tokens(inner);
+                    }
+                }
+            });
+        })?;
+        Ok(tokens)
+    }
 
     #[cfg(not(feature = "simulator"))]
-    fn gen_method_tokens(
+    fn gen_method_call_tokens(
         &mut self,
         expr: &TypedExpression,
         receiver: &TypedExpression,
-        method: syn::Ident,
+        method: &syn::Ident,
         args: &[TypedExpression],
         top_level: bool,
         extra_bind_id: Option<usize>,
         mut bit_length: u16,
     ) -> Result<TokenStream, SpannedError> {
-        fn default_codegen(
-            context: &mut CodegenContext,
-            receiver: &TypedExpression,
-            method: syn::Ident,
-            args: &[TypedExpression],
-        ) -> Result<TokenStream, SpannedError> {
-            let mut tokens = TokenStream::new();
-            receiver.to_tokens(&mut tokens, context)?;
-            token::Dot::default().to_tokens(&mut tokens);
-            method.to_tokens(&mut tokens);
-            catch_inner_error(|err| {
-                token::Paren::default().surround(&mut tokens, |inner| {
-                    for (idx, ty) in args.iter().enumerate() {
-                        if let Err(inner_err) = ty.to_tokens(inner, context) {
-                            *err = Some(inner_err);
-                            return;
-                        }
-                        if idx != args.len() - 1 {
-                            token::Comma::default().to_tokens(inner);
-                        }
-                    }
-                });
-            })?;
-            Ok(tokens)
-        }
-
         fn update_vconfig(tokens: &mut TokenStream, bit_length: u16, context: &mut CodegenContext) {
             // vsetvli x0, t0, e{256,512,1024}, m1, ta, ma
             let v_config = VConfig::Vsetvli {
@@ -629,7 +599,7 @@ impl CodegenContext {
             bit_length = receiver_bit_length;
         }
         if bit_length == 0 {
-            return default_codegen(self, receiver, method, args);
+            return self.default_method_call_codegen(receiver, method, args);
         }
 
         if args.len() != 1 {
@@ -642,10 +612,8 @@ impl CodegenContext {
         let mut tokens = TokenStream::new();
         update_vconfig(&mut tokens, bit_length, self);
 
-        let left = receiver;
-        let right = &args[0];
-        let svreg2 = *self.expr_regs.get(&left.id).unwrap();
-        let svreg1 = *self.expr_regs.get(&right.id).unwrap();
+        let svreg2 = *self.expr_regs.get(&receiver.id).unwrap();
+        let svreg1 = *self.expr_regs.get(&args[0].id).unwrap();
         let dvreg = self.v_registers.next_register().ok_or_else(|| {
             (
                 expr.expr.1,
@@ -653,6 +621,13 @@ impl CodegenContext {
             )
         })?;
         self.expr_regs.insert(expr.id, dvreg);
+        // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
+        if let Some(extra_expr_id) = extra_bind_id {
+            if let Some(dvreg) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, dvreg);
+            }
+        }
+
         let ivv = Ivv {
             vd: VReg::from_u8(dvreg),
             vs2: VReg::from_u8(svreg2),
@@ -660,7 +635,7 @@ impl CodegenContext {
             vm: false,
         };
 
-        let inst = match method.to_string().as_str() {
+        match method.to_string().as_str() {
             "wrapping_add" => inst_codegen(&mut tokens, VInst::VaddVv(ivv), self.show_asm),
             "wrapping_sub" => inst_codegen(&mut tokens, VInst::VsubVv(ivv), self.show_asm),
             "wrapping_mul" => inst_codegen(&mut tokens, VInst::VmulVv(ivv), self.show_asm),
@@ -834,12 +809,13 @@ impl CodegenContext {
                     .map_err(|err| (expr.expr.1, err))?;
             }
             _ => {
-                return default_codegen(self, receiver, method, args);
+                return self.default_method_call_codegen(receiver, method, args);
             }
         };
         Ok(tokens)
     }
 
+    #[cfg(not(feature = "simulator"))]
     fn simple_checked_codegen(
         &mut self,
         tokens: &mut TokenStream,
@@ -911,6 +887,7 @@ impl CodegenContext {
         Ok(())
     }
 
+    #[cfg(not(feature = "simulator"))]
     fn simple_overflowing_codegen(
         &mut self,
         tokens: &mut TokenStream,
@@ -952,6 +929,7 @@ impl CodegenContext {
         Ok(())
     }
 
+    #[cfg(not(feature = "simulator"))]
     fn overflowing_mul_codegen(
         &mut self,
         tokens: &mut TokenStream,
@@ -1094,6 +1072,7 @@ impl CodegenContext {
         Ok(())
     }
 
+    #[cfg(not(feature = "simulator"))]
     fn saturating_mul_codegen(
         &mut self,
         tokens: &mut TokenStream,
@@ -1208,6 +1187,9 @@ impl CodegenContext {
         let (left, op, right, is_assign) = match &expr.expr.0 {
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
+            Expression::MethodCall { receiver, method, args, .. } => {
+                return self.gen_method_call_tokens(expr, receiver, method, args, top_level, extra_bind_id, bit_length);
+            }
             Expression::Paren { expr: sub_expr, .. } => {
                 return self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
             }
@@ -1742,30 +1724,9 @@ impl ToTokenStream for TypedExpression {
                     });
                 })?;
             }
-            Expression::MethodCall {
-                receiver,
-                method,
-                args,
-                ..
-            } => {
+            Expression::MethodCall { .. } => {
                 // FIXME: use rvv assembler (overflowing_add/overflowing_sub ...)
                 tokens.extend(Some(context.gen_tokens(self, true, None, 0)?));
-                // receiver.to_tokens(tokens, context)?;
-                // token::Dot::default().to_tokens(tokens);
-                // method.to_tokens(tokens);
-                // catch_inner_error(|err| {
-                //     token::Paren::default().surround(tokens, |inner| {
-                //         for (idx, ty) in args.iter().enumerate() {
-                //             if let Err(inner_err) = ty.to_tokens(inner, context) {
-                //                 *err = Some(inner_err);
-                //                 return;
-                //             }
-                //             if idx != args.len() - 1 {
-                //                 token::Comma::default().to_tokens(inner);
-                //             }
-                //         }
-                //     });
-                // })?;
             }
             Expression::Macro(mac) => {
                 mac.to_tokens(tokens);
