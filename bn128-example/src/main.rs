@@ -37,18 +37,14 @@ fn internal_main() {
 }
 
 pub fn program_entry(argc: u64, argv: *const *const u8) -> i8 {
-    // for ckb-vm-pprof
-    // bench_mont();
-    // return 0;
-
-    let args = unsafe { from_raw_parts(argv, argc as usize) };
-    if argc > 0 {
-        let arg1 = unsafe { CStr::from_ptr(args[0]) };
+    if argc == 2 {
+        let args = unsafe { from_raw_parts(argv, argc as usize) };
+        let arg1 = unsafe { CStr::from_ptr(args[1]) };
         let arg1 = arg1.to_str().unwrap();
         if arg1 == "bench_mont" {
-            debug(format!("start bench_mont"));
+            // debug(format!("start bench_mont"));
             bench_mont();
-            debug(format!("bench_mont done"));
+            // debug(format!("bench_mont done"));
             return 0;
         }
     }

@@ -27,11 +27,7 @@ run-bench-mont:
 run: run-simulator run-rvv-asm run-raw
 
 pprof-rvv:
-	ckb-vm-pprof-rvv --bin ./target/riscv64imac-unknown-none-elf/release/alt-bn128-example-rvv-asm |  inferno-flamegraph > target/rvv.svg
-
-pprof-simulator:
-	ckb-vm-pprof --bin ./target/riscv64imac-unknown-none-elf/release/alt-bn128-example-simulator |  inferno-flamegraph > target/simulator.svg
-
+	ckb-vm-pprof-rvv --bin ./target/riscv64imac-unknown-none-elf/release/alt-bn128-example-rvv-asm --arg bench_mont |  inferno-flamegraph > target/rvv.svg
 
 expand:
 	cargo expand --lib --features=use_rvv_vector

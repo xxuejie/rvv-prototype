@@ -654,8 +654,9 @@ impl CodegenContext {
                     }));
                 }
                 let uint_type = quote::format_ident!("U{}", bit_length);
+                let buf_length = bit_length as usize / 8;
                 tokens.extend(Some(quote! {
-                    let mut tmp_rvv_vector_buf = [0u8; #bit_length as usize / 8];
+                    let mut tmp_rvv_vector_buf = [0u8; #buf_length];
                     unsafe {
                         asm!(
                             "mv t0, {0}",
@@ -665,7 +666,7 @@ impl CodegenContext {
                             const #b0, const #b1, const #b2, const #b3,
                         )
                     };
-                    #uint_type::from_little_endian(&tmp_rvv_vector_buf[..])
+                    unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) }
                 }));
                 let mut rv = TokenStream::new();
                 token::Brace::default().surround(&mut rv, |inner| {
@@ -1389,7 +1390,7 @@ mod test {
                     unsafe {
                         asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 211u8, const 2u8, const 16u8 ,)
                     };
-                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                    core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                 };
                 if {
                     unsafe {
@@ -1421,7 +1422,7 @@ mod test {
                         unsafe {
                             asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 213u8, const 2u8, const 16u8 ,)
                         };
-                        U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                        core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                     };
                 }
                 z = {
@@ -1435,7 +1436,7 @@ mod test {
                     unsafe {
                         asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 214u8, const 2u8, const 16u8 ,)
                     };
-                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                    core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                 };
                 let abc = 3456;
                 z = ({
@@ -1455,7 +1456,7 @@ mod test {
                     unsafe {
                         asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 216u8, const 2u8, const 16u8 ,)
                     };
-                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                    core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                 });
                 z = {
                     unsafe {
@@ -1465,7 +1466,7 @@ mod test {
                     unsafe {
                         asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 216u8, const 2u8, const 16u8 ,)
                     };
-                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                    core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                 };
                 unsafe {
                     asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 8u8 ,)
@@ -1538,7 +1539,7 @@ mod test {
                     unsafe {
                         asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 241u8, const 2u8, const 16u8 ,)
                     };
-                    U256::from_little_endian(&tmp_rvv_vector_buf[..])
+                    core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf)
                 };
                 z
             }
