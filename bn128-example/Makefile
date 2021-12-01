@@ -3,19 +3,22 @@ CKB_DEBUGGER ?= ckb-debugger-rvv
 TARGET ?= x86_64-apple-darwin
 all: build
 
-# run on ckb-vm, using simulator without V extension
+# Run on ckb-vm, using simulator without V extension.
+# It takes a lot of time to run.
+# Just for development only. Don't try to bench it.
 simulator:
 	cargo build --features=simulator,use_rvv_vector --bin alt-bn128-example-simulator --release
 
-# run on ckb-vm, using V extension
+# Run on ckb-vm, modified code with RISC-V specialized vectorization
 rvv-asm:
 	cargo build --features=use_rvv_vector --bin alt-bn128-example-rvv-asm --release
 
-# run on ckb-vm, original code without porting
+# Run on ckb-vm, original code without RISC-V specialized vectorization.
+# Only use RISC-V IMC instructions.
 riscv-raw:
 	cargo build --bin alt-bn128-example-riscv-raw --release
 
-# run on x86, original code without porting
+# Run on x86, original code
 x86-raw:
 	cargo build --bin alt-bn128-example-x86-raw --release --target=${TARGET}
 
