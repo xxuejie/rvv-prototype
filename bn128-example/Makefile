@@ -1,6 +1,9 @@
 
 CKB_DEBUGGER ?= ckb-debugger-rvv
 
+all: build
+
+
 simulator:
 	cargo build --features=simulator,use_rvv_vector --bin alt-bn128-example-simulator --release
 
@@ -27,10 +30,8 @@ run-bench-mont:
 run: run-simulator run-rvv-asm run-raw
 
 pprof-rvv:
-	ckb-vm-pprof-rvv --bin ./target/riscv64imac-unknown-none-elf/release/alt-bn128-example-rvv-asm --arg bench_mont |  inferno-flamegraph > target/rvv.svg
+	RUST_LOG=debug ${CKB_DEBUGGER} --bin ./target/riscv64imac-unknown-none-elf/release/alt-bn128-example-rvv-asm --pprof target/rvv.pprof -- main bench_mont
+	cat target/rvv.pprof | inferno-flamegraph > target/rvv.svg
 
 expand:
 	cargo expand --lib --features=use_rvv_vector
-
-install-tools:
-	cargo install --git https://github.com/mohanson/ckb-vm-pprof.git --branch rvv

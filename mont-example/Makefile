@@ -1,5 +1,7 @@
 CKB_DEBUGGER ?= ckb-debugger-rvv
 
+all: build
+
 
 simulator:
 	cargo build --features=simulator,use_rvv_vector --bin mont-example-simulator --release
