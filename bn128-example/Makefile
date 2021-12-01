@@ -37,7 +37,7 @@ run-x86-raw:
 run-bench-mont:
 	RUST_LOG=debug time ${CKB_DEBUGGER} --max-cycles 2000000000 --bin ./target/riscv64imac-unknown-none-elf/release/alt-bn128-example-rvv-asm -- bench_mont
 
-run: run-simulator run-rvv-asm
+run: run-riscv-raw run-rvv-asm
 
 pprof-rvv:
 	RUST_LOG=debug ${CKB_DEBUGGER} --bin ./target/riscv64imac-unknown-none-elf/release/alt-bn128-example-rvv-asm --pprof target/rvv.pprof
