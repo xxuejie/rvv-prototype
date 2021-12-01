@@ -42,6 +42,11 @@ required-features = ["use_rvv_vector"]
 
 [[bin]]
 path = "src/main.rs"
-name = "alt-bn128-example-raw"
+name = "alt-bn128-example-riscv-raw"
+required-features = []
+
+[[bin]]
+path = "src/bin/alt-bn128-example-x86-raw.rs"
+name = "alt-bn128-example-x86-raw"
 required-features = []
 
