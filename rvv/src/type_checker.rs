@@ -271,6 +271,51 @@ impl TypeChecker for TypedExpression {
                     inner_ty
                 }
             }
+            Expression::MethodCall {
+                receiver, method, ..
+            } => match receiver.type_name().as_deref() {
+                Some("U256") | Some("U512") | Some("U1024") => match method.to_string().as_str() {
+                    "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "wrapping_div"
+                    | "wrapping_rem" | "saturating_add" | "saturating_sub" | "saturating_mul" => {
+                        receiver.ty.clone()
+                    }
+                    "checked_add" | "checked_sub" | "checked_mul" | "checked_div"
+                    | "checked_rem" => None,
+                    "overflowing_add" | "overflowing_sub" | "overflowing_mul" => Some(Box::new((
+                        Type::Tuple {
+                            paren_token: Span::default(),
+                            elems: vec![
+                                receiver
+                                    .ty
+                                    .as_ref()
+                                    .map(|ty| WithSpan::<Type>::clone(ty))
+                                    .unwrap(),
+                                (Type::primitive("bool"), Span::default()),
+                            ],
+                        },
+                        Span::default(),
+                    ))),
+                    _ => None,
+                },
+                _ => None,
+            },
+            // Handle:
+            //   - x.overflowing_mul(y).0
+            //   - x.overflowing_mul(y).1
+            // NOTE: Just infer the type, not used in codegen.
+            Expression::Field {
+                base,
+                member: syn::Member::Unnamed(syn::Index { index, .. }),
+                ..
+            } => {
+                let index_usize = *index as usize;
+                match base.ty.as_ref().map(|span_ty| &span_ty.0) {
+                    Some(Type::Tuple { elems, .. }) if index_usize < elems.len() => {
+                        Some(Box::new(elems[index_usize].clone()))
+                    }
+                    _ => None,
+                }
+            }
             Expression::Unary { op, expr } => match op {
                 syn::UnOp::Deref(_) => {
                     if !expr.ty.as_ref().map(|ty| ty.0.is_ref()).unwrap_or(true) {

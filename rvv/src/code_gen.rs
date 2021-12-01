@@ -123,7 +123,7 @@ fn overflowing_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16,
     let uint_type = quote::format_ident!("U{}", bit_length);
     let buf_length = bit_length as usize / 8;
     tokens.extend(Some(quote! {
-        let mut tmp_bool_var: i64;
+        let tmp_bool_var: i64;
         let mut tmp_rvv_vector_buf = [0u8; #buf_length];
         // t0: 0  (vms* success)
         // t0: -1 (not found)
@@ -160,7 +160,7 @@ fn checked_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16, sho
     let uint_type = quote::format_ident!("U{}", bit_length);
     let buf_length = bit_length as usize / 8;
     tokens.extend(Some(quote! {
-        let mut tmp_bool_var: i64;
+        let tmp_bool_var: i64;
         // t0: 0  (vms* success)
         // t0: -1 (not found)
         unsafe {
@@ -172,7 +172,7 @@ fn checked_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16, sho
         if tmp_bool_var == 0 {
             None
         } else {
-            let mut tmp_rvv_vector_buf = [0u8; #bit_length as usize / 8];
+            let mut tmp_rvv_vector_buf = [0u8; #buf_length];
             unsafe {
                 asm!(
                     "mv t1, {0}",
@@ -196,8 +196,8 @@ pub struct CodegenContext {
     // FIXME: handle varable scope
     // var_name => register_number
     var_regs: HashMap<syn::Ident, u8>,
-    // expr_id => register_number
-    expr_regs: HashMap<usize, u8>,
+    // expr_id => (register_number, bit_length)
+    expr_regs: HashMap<usize, (u8, u16)>,
 
     // expr_id => (var_name, bit_length)
     #[cfg(feature = "simulator")]
@@ -294,7 +294,7 @@ impl CodegenContext {
         for typed_expr in [left, right] {
             if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(typed_expr.id, *vreg);
+                    self.expr_regs.insert(typed_expr.id, (*vreg, bit_length));
                 } else {
                     let vreg = self.v_registers.next_register().ok_or_else(|| {
                         (
@@ -303,7 +303,7 @@ impl CodegenContext {
                         )
                     })?;
                     self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(typed_expr.id, vreg);
+                    self.expr_regs.insert(typed_expr.id, (vreg, bit_length));
                 }
                 self.expr_tokens
                     .insert(typed_expr.id, (quote! {#var_ident}, bit_length));
@@ -333,7 +333,7 @@ impl CodegenContext {
                     anyhow!("not enough V register for this expression"),
                 )
             })?;
-            self.expr_regs.insert(expr.id, dvreg);
+            self.expr_regs.insert(expr.id, (dvreg, bit_len1));
         }
 
         // FIXME:
@@ -511,8 +511,8 @@ impl CodegenContext {
         self.expr_tokens.insert(expr.id, (tokens.clone(), bit_len1));
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some(dvreg) = self.expr_regs.get(&expr.id).cloned() {
-                self.expr_regs.insert(extra_expr_id, dvreg);
+            if let Some((dvreg, bit_len)) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, (dvreg, bit_len));
             }
             let ts_inner = tokens.clone();
             let ts = quote! {
@@ -549,6 +549,7 @@ impl CodegenContext {
     }
 
     #[cfg(not(feature = "simulator"))]
+    #[allow(clippy::too_many_arguments)]
     fn gen_method_call_tokens(
         &mut self,
         expr: &TypedExpression,
@@ -593,7 +594,11 @@ impl CodegenContext {
             Some("U256") => 256,
             Some("U512") => 512,
             Some("U1024") => 1024,
-            _ => 0,
+            _ => self
+                .expr_regs
+                .get(&expr.id)
+                .map(|(_, bit_len)| *bit_len)
+                .unwrap_or(0),
         };
         if top_level {
             bit_length = receiver_bit_length;
@@ -602,29 +607,91 @@ impl CodegenContext {
             return self.default_method_call_codegen(receiver, method, args);
         }
 
-        if args.len() != 1 {
-            return Err((
-                expr.expr.1,
-                anyhow!("special method call to U256/U512/U1024, must have exact one argument"),
-            ));
+        let method_string = method.to_string();
+        let mut tokens = TokenStream::new();
+        match method_string.as_str() {
+            "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "wrapping_div" | "wrapping_rem"
+            | "overflowing_add" | "overflowing_sub" | "overflowing_mul" | "checked_add"
+            | "checked_sub" | "checked_mul" | "checked_div" | "checked_rem" | "saturating_add"
+            | "saturating_sub" | "saturating_mul" => {
+                if args.len() != 1 {
+                    return Err((
+                        expr.expr.1,
+                        anyhow!(
+                            "special method call to U256/U512/U1024, must have exact one argument"
+                        ),
+                    ));
+                }
+            }
+            _ => {
+                return self.default_method_call_codegen(receiver, method, args);
+            }
         }
 
-        let mut tokens = TokenStream::new();
         update_vconfig(&mut tokens, bit_length, self);
 
-        let svreg2 = *self.expr_regs.get(&receiver.id).unwrap();
-        let svreg1 = *self.expr_regs.get(&args[0].id).unwrap();
+        let left = &receiver;
+        let right = &args[0];
+        for typed_expr in [left, right] {
+            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
+                if let Some(vreg) = self.var_regs.get(var_ident) {
+                    self.expr_regs.insert(typed_expr.id, (*vreg, bit_length));
+                } else {
+                    // Load{256,512,1024}
+                    let vreg = self.v_registers.next_register().ok_or_else(|| {
+                        (
+                            typed_expr.expr.1,
+                            anyhow!("not enough V register for this expression"),
+                        )
+                    })?;
+                    // FIXME: t0 register may already used by Rust code
+                    let inst = VInst::VleV {
+                        width: bit_length,
+                        vd: VReg::from_u8(vreg),
+                        rs1: XReg::T0,
+                        vm: false,
+                    };
+                    let [b0, b1, b2, b3] = inst.encode_bytes();
+                    if self.show_asm {
+                        let comment = format!("{} - {}", inst.encode_u32(), inst);
+                        tokens.extend(Some(quote! {
+                            let _ = #comment;
+                        }));
+                    }
+                    let ts = quote! {
+                        unsafe {
+                            asm!(
+                                "mv t0, {0}",
+                                ".byte {1}, {2}, {3}, {4}",
+                                in(reg) #var_ident.as_ref().as_ptr(),
+                                const #b0, const #b1, const #b2, const #b3,
+                            )
+                        }
+                    };
+                    tokens.extend(Some(ts));
+                    self.var_regs.insert(var_ident.clone(), vreg);
+                    self.expr_regs.insert(typed_expr.id, (vreg, bit_length));
+                }
+            } else {
+                let ts = self.gen_tokens(typed_expr, false, None, bit_length)?;
+                tokens.extend(Some(ts));
+            }
+        }
+
+        let (svreg2, bit_len2) = *self.expr_regs.get(&left.id).unwrap();
+        let (svreg1, bit_len1) = *self.expr_regs.get(&right.id).unwrap();
+        assert_eq!(bit_len1, bit_len2);
         let dvreg = self.v_registers.next_register().ok_or_else(|| {
             (
                 expr.expr.1,
                 anyhow!("not enough V register for this expression"),
             )
         })?;
-        self.expr_regs.insert(expr.id, dvreg);
+        self.expr_regs.insert(expr.id, (dvreg, bit_len1));
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some(dvreg) = self.expr_regs.get(&expr.id).cloned() {
-                self.expr_regs.insert(extra_expr_id, dvreg);
+            if let Some((dvreg, bit_len)) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, (dvreg, bit_len));
             }
         }
 
@@ -635,7 +702,7 @@ impl CodegenContext {
             vm: false,
         };
 
-        match method.to_string().as_str() {
+        match method_string.as_str() {
             "wrapping_add" => inst_codegen(&mut tokens, VInst::VaddVv(ivv), self.show_asm),
             "wrapping_sub" => inst_codegen(&mut tokens, VInst::VsubVv(ivv), self.show_asm),
             "wrapping_mul" => inst_codegen(&mut tokens, VInst::VmulVv(ivv), self.show_asm),
@@ -808,11 +875,60 @@ impl CodegenContext {
                 self.saturating_mul_codegen(&mut tokens, ivv, bit_length)
                     .map_err(|err| (expr.expr.1, err))?;
             }
-            _ => {
-                return self.default_method_call_codegen(receiver, method, args);
-            }
+            _ => {}
         };
-        Ok(tokens)
+
+        let is_simple_asm = matches!(
+            method_string.as_str(),
+            "wrapping_add"
+                | "wrapping_sub"
+                | "wrapping_mul"
+                | "wrapping_div"
+                | "wrapping_rem"
+                | "saturating_add"
+                | "saturating_sub"
+        );
+
+        if top_level {
+            if is_simple_asm {
+                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
+                let inst = VInst::VseV {
+                    width: bit_length,
+                    vs3: VReg::from_u8(vreg),
+                    rs1: XReg::T0,
+                    vm: false,
+                };
+                let [b0, b1, b2, b3] = inst.encode_bytes();
+                if self.show_asm {
+                    let comment = format!("{} - {}", inst, inst.encode_u32());
+                    tokens.extend(Some(quote! {
+                        let _ = #comment;
+                    }));
+                }
+                let uint_type = quote::format_ident!("U{}", bit_length);
+                let buf_length = bit_length as usize / 8;
+                tokens.extend(Some(quote! {
+                    let mut tmp_rvv_vector_buf = [0u8; #buf_length];
+                    unsafe {
+                        asm!(
+                            "mv t0, {0}",
+                            // This should be vse{256, 512, 1024}
+                            ".byte {1}, {2}, {3}, {4}",
+                            in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
+                            const #b0, const #b1, const #b2, const #b3,
+                        )
+                    }
+                    unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) }
+                }));
+            }
+            let mut rv = TokenStream::new();
+            token::Brace::default().surround(&mut rv, |inner| {
+                inner.extend(Some(tokens));
+            });
+            Ok(rv)
+        } else {
+            Ok(tokens)
+        }
     }
 
     #[cfg(not(feature = "simulator"))]
@@ -854,7 +970,7 @@ impl CodegenContext {
         let uint_type = quote::format_ident!("U{}", bit_length);
         let buf_length = bit_length as usize / 8;
         let ts = quote! {
-            let mut tmp_bool_var: i64;
+            let tmp_bool_var: i64;
             // tn: 0  (vms* success)
             // tn: -1 (not found)
             unsafe {
@@ -997,7 +1113,7 @@ impl CodegenContext {
         let uint_type = quote::format_ident!("U{}", bit_length);
         let buf_length = bit_length as usize / 8;
         inner_tokens.extend(Some(quote! {
-            let mut tmp_bool_t0: i64;
+            let tmp_bool_t0: i64;
             let mut tmp_rvv_vector_buf = [0u8; #buf_length];
             unsafe {
                 asm!(
@@ -1015,7 +1131,7 @@ impl CodegenContext {
         let ts = if is_checked {
             quote! {
                 if tmp_bool_t0 == 0 {
-                    let mut tmp_bool_t1: i64;
+                    let tmp_bool_t1: i64;
                     unsafe {
                         asm!(
                             // vdivu.vv v4, v1, v2
@@ -1043,7 +1159,7 @@ impl CodegenContext {
         } else {
             quote! {
                 if tmp_bool_t0 == 0 {
-                    let mut tmp_bool_t1: i64;
+                    let tmp_bool_t1: i64;
                     unsafe {
                         asm!(
                             // vdivu.vv v5, v1, v2
@@ -1256,7 +1372,7 @@ impl CodegenContext {
         for typed_expr in [left, right] {
             if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(typed_expr.id, *vreg);
+                    self.expr_regs.insert(typed_expr.id, (*vreg, bit_length));
                 } else {
                     // Load{256,512,1024}
                     let vreg = self.v_registers.next_register().ok_or_else(|| {
@@ -1291,7 +1407,7 @@ impl CodegenContext {
                     };
                     tokens.extend(Some(ts));
                     self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(typed_expr.id, vreg);
+                    self.expr_regs.insert(typed_expr.id, (vreg, bit_length));
                 }
             } else {
                 let ts = self.gen_tokens(typed_expr, false, None, bit_length)?;
@@ -1300,8 +1416,9 @@ impl CodegenContext {
         }
 
         let op_category = OpCategory::from(op);
-        let svreg2 = *self.expr_regs.get(&left.id).unwrap();
-        let svreg1 = *self.expr_regs.get(&right.id).unwrap();
+        let (svreg2, bit_len2) = *self.expr_regs.get(&left.id).unwrap();
+        let (svreg1, bit_len1) = *self.expr_regs.get(&right.id).unwrap();
+        assert_eq!(bit_len1, bit_len2);
         let dvreg = match op_category {
             OpCategory::Binary | OpCategory::Bool => {
                 let dvreg = self.v_registers.next_register().ok_or_else(|| {
@@ -1310,7 +1427,7 @@ impl CodegenContext {
                         anyhow!("not enough V register for this expression"),
                     )
                 })?;
-                self.expr_regs.insert(expr.id, dvreg);
+                self.expr_regs.insert(expr.id, (dvreg, bit_len1));
                 dvreg
             }
             OpCategory::AssignOp => svreg1,
@@ -1389,14 +1506,14 @@ impl CodegenContext {
 
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some(dvreg) = self.expr_regs.get(&expr.id).cloned() {
-                self.expr_regs.insert(extra_expr_id, dvreg);
+            if let Some((dvreg, bit_len)) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, (dvreg, bit_len));
             }
         }
 
         match op_category {
             OpCategory::Binary if top_level => {
-                let vreg = *self.expr_regs.get(&expr.id).unwrap();
+                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
                 let inst = VInst::VseV {
                     width: bit_length,
                     vs3: VReg::from_u8(vreg),
@@ -1433,7 +1550,7 @@ impl CodegenContext {
             }
             OpCategory::Binary | OpCategory::AssignOp => Ok(tokens),
             OpCategory::Bool => {
-                let vreg = *self.expr_regs.get(&expr.id).unwrap();
+                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
                 let inst = VInst::VfirstM {
                     rd: XReg::T0,
                     vs2: VReg::from_u8(vreg),
@@ -1448,7 +1565,7 @@ impl CodegenContext {
                     }));
                 }
                 tokens.extend(Some(quote! {
-                    let mut tmp_rv_t0: i64;
+                    let tmp_bool_t0: i64;
                     // t0: 0  (vms* success)
                     // t0: -1 (not found)
                     unsafe {
@@ -1457,10 +1574,10 @@ impl CodegenContext {
                             ".byte {0}, {1}, {2}, {3}",
                             "mv {4}, t0",
                             const #b0, const #b1, const #b2, const #b3,
-                            out (reg) tmp_rv_t0,
+                            out (reg) tmp_bool_t0,
                         )
                     }
-                    tmp_rv_t0 == 0
+                    tmp_bool_t0 == 0
                 }));
                 let mut rv = TokenStream::new();
                 token::Brace::default().surround(&mut rv, |inner| {
@@ -2101,132 +2218,132 @@ mod test {
                 let x_bytes = x.to_le_bytes();
                 let j = {
                     unsafe {
-                        asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 14u8 ,)
+                        asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 14u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 208u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 7u8 , const 208u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) z.to_le_bytes ().as_ptr (), const 135u8, const 208u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) z . as_ref () . as_ptr () , const 135u8 , const 208u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 7u8, const 209u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) y . as_ref () . as_ptr () , const 7u8 , const 209u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 129u8, const 32u8, const 148u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 33u8 , const 17u8 , const 148u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) w.to_le_bytes ().as_ptr (), const 7u8, const 210u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) w . as_ref () . as_ptr () , const 7u8 , const 210u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 130u8, const 65u8, const 128u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 34u8 , const 50u8 , const 128u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 3u8, const 80u8, const 0u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 131u8 , const 2u8 , const 0u8 ,)
                     }
-                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    let mut tmp_rvv_vector_buf = [0u8; 32usize];
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 211u8, const 2u8, const 16u8 ,)
-                    };
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 211u8 , const 2u8 , const 16u8 ,)
+                    }
                     core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                 };
                 if {
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 3u8, const 1u8, const 104u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 3u8 , const 32u8 , const 104u8 ,)
                     }
-                    let mut tmp_rv_t0: i64;
+                    let tmp_bool_t0: i64;
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", "mv {4}, t0", const 215u8, const 162u8, const 120u8, const 64u8, out (reg) tmp_rv_t0 ,)
-                    };
-                    tmp_rv_t0 == 0
+                        asm ! (".byte {0}, {1}, {2}, {3}" , "mv {4}, t0" , const 215u8 , const 162u8 , const 120u8 , const 64u8 , out (reg) tmp_bool_t0 ,)
+                    }
+                    tmp_bool_t0 == 0
                 } && {
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 4u8, const 17u8, const 96u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 132u8 , const 32u8 , const 96u8 ,)
                     }
-                    let mut tmp_rv_t0: i64;
+                    let tmp_bool_t0: i64;
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", "mv {4}, t0", const 215u8, const 162u8, const 136u8, const 64u8, out (reg) tmp_rv_t0 ,)
-                    };
-                    tmp_rv_t0 == 0
+                        asm ! (".byte {0}, {1}, {2}, {3}" , "mv {4}, t0" , const 215u8 , const 162u8 , const 136u8 , const 64u8 , out (reg) tmp_bool_t0 ,)
+                    }
+                    tmp_bool_t0 == 0
                 } {
                     z = {
                         unsafe {
-                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 132u8, const 32u8, const 40u8 ,)
+                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 4u8 , const 17u8 , const 40u8 ,)
                         }
                         unsafe {
-                            asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 5u8, const 144u8, const 36u8 ,)
+                            asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 133u8 , const 4u8 , const 36u8 ,)
                         }
-                        let mut tmp_rvv_vector_buf = [0u8; 32];
+                        let mut tmp_rvv_vector_buf = [0u8; 32usize];
                         unsafe {
-                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 213u8, const 2u8, const 16u8 ,)
-                        };
+                            asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 213u8 , const 2u8 , const 16u8 ,)
+                        }
                         core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
-                    };
+                    }
                 }
                 z = {
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 5u8, const 32u8, const 8u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 5u8 , const 1u8 , const 8u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 134u8, const 5u8, const 148u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 38u8 , const 176u8 , const 148u8 ,)
                     }
-                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    let mut tmp_rvv_vector_buf = [0u8; 32usize];
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 214u8, const 2u8, const 16u8 ,)
-                    };
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 214u8 , const 2u8 , const 16u8 ,)
+                    }
                     core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                 };
                 let abc = 3456;
                 z = ({
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) j.to_le_bytes ().as_ptr (), const 135u8, const 214u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) j . as_ref () . as_ptr () , const 135u8 , const 214u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 7u8, const 1u8, const 8u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 7u8 , const 32u8 , const 8u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 135u8, const 230u8, const 148u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 39u8 , const 215u8 , const 148u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 8u8, const 241u8, const 0u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 136u8 , const 39u8 , const 0u8 ,)
                     }
-                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    let mut tmp_rvv_vector_buf = [0u8; 32usize];
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 39u8, const 216u8, const 2u8, const 16u8 ,)
-                    };
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 216u8 , const 2u8 , const 16u8 ,)
+                    }
                     core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                 });
                 z = {
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 136u8, const 16u8, const 0u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 136u8 , const 16u8 , const 0u8 ,)
                     }
-                    let mut tmp_rvv_vector_buf = [0u8; 32];
+                    let mut tmp_rvv_vector_buf = [0u8; 32usize];
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 216u8, const 2u8, const 16u8 ,)
-                    };
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 167u8 , const 216u8 , const 2u8 , const 16u8 ,)
+                    }
                     core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
                 };
                 unsafe {
-                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 8u8 ,)
+                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 1u8 , const 17u8 , const 8u8 ,)
                 };
                 unsafe {
-                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 148u8 ,)
+                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 33u8 , const 17u8 , const 148u8 ,)
                 };
                 unsafe {
-                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 0u8 ,)
+                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 1u8 , const 17u8 , const 0u8 ,)
                 };
                 unsafe {
-                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 136u8 ,)
+                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 33u8 , const 17u8 , const 136u8 ,)
                 };
                 unsafe {
-                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 160u8 ,)
+                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 1u8 , const 17u8 , const 160u8 ,)
                 };
                 let zero = U256::zero();
                 unsafe {
-                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) zero.to_le_bytes ().as_ptr (), const 7u8, const 217u8, const 2u8, const 16u8 ,)
+                    asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) zero . as_ref () . as_ptr () , const 7u8 , const 217u8 , const 2u8 , const 16u8 ,)
                 }
                 unsafe {
-                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 129u8 ,)
+                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 41u8 , const 25u8 , const 128u8 ,)
                 };
                 z
             }
@@ -2259,25 +2376,25 @@ mod test {
             fn comp_u1024(x: U1024, y: U1024) -> U1024 {
                 let z = {
                     unsafe {
-                        asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
+                        asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 240u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 7u8 , const 240u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 135u8, const 240u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) y . as_ref () . as_ptr () , const 135u8 , const 240u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 1u8, const 16u8, const 0u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 129u8 , const 0u8 , const 0u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 1u8, const 1u8, const 148u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 33u8 , const 32u8 , const 148u8 ,)
                     }
-                    let mut tmp_rvv_vector_buf = [0u8; 1024 / 8];
+                    let mut tmp_rvv_vector_buf = [0u8; 128usize];
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 241u8, const 2u8, const 16u8 ,)
-                    };
-                    U1024::from_little_endian(&tmp_rvv_vector_buf[..])
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 167u8 , const 241u8 , const 2u8 , const 16u8 ,)
+                    }
+                    core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf)
                 };
                 z
             }
@@ -2288,8 +2405,14 @@ mod test {
     #[test]
     fn test_method_call() {
         let input = quote! {
-            fn comp_u1024(x: U1024, y: U1024) -> U1024 {
-                let z = x.wrapping_add(y).wrapping_mul(x);
+            fn comp_u1024(a: U1024, b: U1024, c: U1024, d: U1024) -> U1024 {
+                let x_tuple = a.wrapping_add(b).overflowing_mul(c);
+                let x = x_tuple.0;
+                let z_opt = x.checked_div(d);
+                let z: U1024 = z.unwrap();
+                // let z = x.overflowing_add(y);
+                // let z = x.checked_add(y).unwrap();
+                // let z = x.saturating_add(y);
                 z
             }
         };
@@ -2298,29 +2421,79 @@ mod test {
         println!("[otuput]: {}", output);
 
         let expected_output = quote! {
-            fn comp_u1024(x: U1024, y: U1024) -> U1024 {
-                let z = {
+            fn comp_u1024(a: U1024, b: U1024, c: U1024, d: U1024) -> U1024 {
+                let x_tuple = {
                     unsafe {
-                        asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
+                        asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.to_le_bytes ().as_ptr (), const 7u8, const 240u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) a . as_ref () . as_ptr () , const 7u8 , const 240u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.to_le_bytes ().as_ptr (), const 135u8, const 240u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) b . as_ref () . as_ptr () , const 135u8 , const 240u8 , const 2u8 , const 16u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 1u8, const 16u8, const 0u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 129u8 , const 0u8 , const 0u8 ,)
                     }
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 1u8, const 1u8, const 148u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) c . as_ref () . as_ptr () , const 135u8 , const 241u8 , const 2u8 , const 16u8 ,)
                     }
-                    let mut tmp_rvv_vector_buf = [0u8; 32];
-                    unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr (), const 167u8, const 241u8, const 2u8, const 16u8 ,)
-                    };
-                    core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf)
+                    {
+                        unsafe {
+                            asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 162u8 , const 33u8 , const 148u8 ,)
+                        }
+                        unsafe {
+                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 50u8 , const 64u8 , const 100u8 ,)
+                        }
+                        unsafe {
+                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 162u8 , const 88u8 , const 64u8 ,)
+                        }
+                        let tmp_bool_t0: i64;
+                        let mut tmp_rvv_vector_buf = [0u8; 128usize];
+                        unsafe {
+                            asm ! ("mv {0}, t0" , "mv t2, {1}" , ".byte {2}, {3}, {4}, {5}" , out (reg) tmp_bool_t0 , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 242u8 , const 3u8 , const 16u8 ,)
+                        }
+                        let tmp_uint_rv = core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf);
+                        if tmp_bool_t0 == 0 {
+                            let tmp_bool_t1: i64;
+                            unsafe {
+                                asm ! (".byte {0}, {1}, {2}, {3}" , ".byte {4}, {5}, {6}, {7}" , ".byte {8}, {9}, {10}, {11}" , "mv {12}, t1" , const 215u8 , const 34u8 , const 65u8 , const 128u8 , const 215u8 , const 130u8 , const 81u8 , const 100u8 , const 87u8 , const 163u8 , const 88u8 , const 64u8 , out (reg) tmp_bool_t1 ,)
+                            }
+                            (tmp_uint_rv, tmp_bool_t1 == 0)
+                        } else {
+                            (tmp_uint_rv, false)
+                        }
+                    }
                 };
+                let x = x_tuple.0;
+                let z_opt = {
+                    unsafe {
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 7u8 , const 243u8 , const 2u8 , const 16u8 ,)
+                    }
+                    unsafe {
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) d . as_ref () . as_ptr () , const 135u8 , const 243u8 , const 2u8 , const 16u8 ,)
+                    }
+                    {
+                        unsafe {
+                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 52u8 , const 112u8 , const 96u8 ,)
+                        }
+                        unsafe {
+                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 162u8 , const 152u8 , const 64u8 ,)
+                        }
+                        let tmp_bool_var: i64;
+                        unsafe { asm ! ("mv {0} t0" , out (reg) tmp_bool_var ,) }
+                        if tmp_bool_var == 0 {
+                            None
+                        } else {
+                            let mut tmp_rvv_vector_buf = [0u8; 128usize];
+                            unsafe {
+                                asm ! (".byte {0}, {1}, {2}, {3}" "mv t1, {4}" , ".byte {5}, {6}, {7}, {8}" , const 87u8 , const 164u8 , const 99u8 , const 128u8 , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 116u8 , const 3u8 , const 16u8 ,)
+                            }
+                            Some(core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf))
+                        }
+                    }
+                };
+                let z: U1024 = z.unwrap();
                 z
             }
         };
