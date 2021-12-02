@@ -42,9 +42,9 @@ pub fn program_entry(argc: u64, argv: *const *const u8) -> i8 {
         let arg1 = unsafe { CStr::from_ptr(args[1]) };
         let arg1 = arg1.to_str().unwrap();
         if arg1 == "bench_mont" {
-            // debug(format!("start bench_mont"));
+            debug(format!("start bench_mont"));
             bench_mont();
-            // debug(format!("bench_mont done"));
+            debug(format!("bench_mont done"));
             return 0;
         }
     }
