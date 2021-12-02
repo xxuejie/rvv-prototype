@@ -17,6 +17,10 @@ jobs:
         cargo install --path . -f
     - name: Run rvv unit tests
       run: cd rvv && cargo test && cargo test --features=simulator
+    - name: Run rvv-tests simulator/rvv-asm/raw tests
+      run: |
+        docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd rvv-tests && make build'
+        cd rvv-tests && make run
     - name: Run mont-example simulator/rvv-asm/raw tests
       run: |
         docker run --rm -eOWNER=`id -u`:`id -g` -v `pwd`:/code -v ${HOME}/.cargo/git:/root/.cargo/git -v ${HOME}/.cargo/registry:/root/.cargo/registry -w/code thewawar/ckb-capsule:2021-08-16 bash -c 'cd mont-example && make build'

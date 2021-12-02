@@ -1,0 +1,36 @@
+[workspace]
+
+[package]
+name = "rvv-tests"
+version = "0.1.0"
+edition = "2018"
+description = "rvv_vector proc-macro test collections"
+
+# this configuration is very important to CKB-VM
+[profile.release]
+lto = "fat"
+
+[dependencies]
+rvv = { path = "../rvv" }
+ckb-std = "0.9.0"
+rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
+
+[features]
+default = []
+use_rvv_vector = []
+simulator = ["rvv/simulator"]
+
+[[bin]]
+path = "src/main.rs"
+name = "rvv-tests-simulator"
+required-features = ["simulator", "use_rvv_vector"]
+
+[[bin]]
+path = "src/main.rs"
+name = "rvv-tests-rvv-asm"
+required-features = ["use_rvv_vector"]
+
+[[bin]]
+path = "src/main.rs"
+name = "rvv-tests-raw"
+required-features = []

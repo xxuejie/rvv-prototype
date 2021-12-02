@@ -1,4 +1,5 @@
 /target
 Cargo.lock
+rvv-tests/target
 bn128-example/target
 mont-example/target

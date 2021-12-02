@@ -345,19 +345,19 @@ impl CodegenContext {
             // The `+` operator (addition)
             syn::BinOp::Add(_) => {
                 quote! {
-                    #expr1.overflowing_add(#expr2).0
+                    #expr1.wrapping_add(#expr2)
                 }
             }
             // The `-` operator (subtraction)
             syn::BinOp::Sub(_) => {
                 quote! {
-                    #expr1.overflowing_sub(#expr2).0
+                    #expr1.wrapping_sub(#expr2)
                 }
             }
             // The `*` operator (multiplication)
             syn::BinOp::Mul(_) => {
                 quote! {
-                    #expr1.overflowing_mul(#expr2).0
+                    #expr1.wrapping_mul(#expr2)
                 }
             }
             // The `/` operator (division)
@@ -448,19 +448,19 @@ impl CodegenContext {
             // The `+=` operator
             syn::BinOp::AddEq(_) => {
                 quote! {
-                    #expr1 = #expr1.overflowing_add(#expr2).0
+                    #expr1 = #expr1.wrapping_add(#expr2)
                 }
             }
             // The `-=` operator
             syn::BinOp::SubEq(_) => {
                 quote! {
-                    #expr1 = #expr1.overflowing_sub(#expr2).0
+                    #expr1 = #expr1.wrapping_sub(#expr2)
                 }
             }
             // The `*=` operator
             syn::BinOp::MulEq(_) => {
                 quote! {
-                    #expr1 = #expr1.overflowing_mul(#expr2).0
+                    #expr1 = #expr1.wrapping_mul(#expr2)
                 }
             }
             // The `/=` operator
@@ -2193,25 +2193,20 @@ mod test {
         let expected_output = quote! {
             fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
                 let x_bytes = x.to_le_bytes();
-                let j = x
-                    .overflowing_add(
-                        (z.overflowing_mul(y)
-                         .0
-                         .checked_div(w)
-                         .unwrap_or_else(|| U256::max_value())))
-                    .0;
+                let j = x.wrapping_add(
+                    (z.wrapping_mul(y)
+                     .checked_div(w)
+                     .unwrap_or_else(|| U256::max_value())));
                 if x > y && y == z {
                     z = x & (z | y);
                 }
-                z = (x.overflowing_sub(y).0).overflowing_mul(x).0;
+                z = (x.wrapping_sub(y)).wrapping_mul(x);
                 let abc = 3456;
-                z = (y
-                     .overflowing_add(j.overflowing_mul((y.overflowing_sub(x).0)).0)
-                     .0);
-                z = z.overflowing_add(z).0;
-                z = z.overflowing_sub(y).0;
-                z = z.overflowing_mul(y).0;
-                z = z.overflowing_add(y).0;
+                z = (y.wrapping_add(j.wrapping_mul((y.wrapping_sub(x)))));
+                z = z.wrapping_add(z);
+                z = z.wrapping_sub(y);
+                z = z.wrapping_mul(y);
+                z = z.wrapping_add(y);
                 z %= y;
                 z >>= y;
                 let zero = U256::zero();
@@ -2378,7 +2373,7 @@ mod test {
             #[inline(always)]
             #[no_mangle]
             fn comp_u1024(x: U1024, y: U1024) -> U1024 {
-                let z = (x.overflowing_add(y).0).overflowing_mul(x).0;
+                let z = (x.wrapping_add(y)).wrapping_mul(x);
                 z
             }
         };
