@@ -2420,6 +2420,18 @@ mod test {
         let output = rvv_test(input, false).unwrap();
         println!("[otuput]: {}", output);
 
+        #[cfg(feature = "simulator")]
+        let expected_output = quote! {
+            fn comp_u1024(a: U1024, b: U1024, c: U1024, d: U1024) -> U1024 {
+                let x_tuple = a.wrapping_add (b).overflowing_mul(c);
+                let x = x_tuple.0 ;
+                let z_opt = x.checked_div(d) ;
+                let z : U1024 = z.unwrap() ;
+                z
+            }
+        };
+
+        #[cfg(not(feature = "simulator"))]
         let expected_output = quote! {
             fn comp_u1024(a: U1024, b: U1024, c: U1024, d: U1024) -> U1024 {
                 let x_tuple = {
