@@ -19,6 +19,7 @@ construct_uint! {
 }
 
 #[rvv_vector(show_asm)]
+#[inline(always)]
 #[no_mangle]
 fn bn256_add(
     mut ax: U256,

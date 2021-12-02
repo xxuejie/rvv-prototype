@@ -832,6 +832,7 @@ pub struct Signature {
 pub struct ItemFn {
     pub span: Span,
 
+    pub attrs: Vec<syn::Attribute>,
     pub vis: syn::Visibility,
     pub sig: Signature,
     pub block: Block,

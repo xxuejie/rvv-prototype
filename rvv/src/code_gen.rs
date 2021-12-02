@@ -2069,6 +2069,14 @@ impl ToTokenStream for ItemFn {
         tokens: &mut TokenStream,
         context: &mut CodegenContext,
     ) -> Result<(), SpannedError> {
+        for attr in &self.attrs {
+            match attr.style {
+                syn::AttrStyle::Outer => {
+                    attr.to_tokens(tokens);
+                }
+                _ => {}
+            }
+        }
         self.vis.to_tokens(tokens);
         self.sig.to_tokens(tokens, context)?;
         self.block.to_tokens(tokens, context)?;
@@ -2354,6 +2362,8 @@ mod test {
     #[test]
     fn test_u1024() {
         let input = quote! {
+            #[inline(always)]
+            #[no_mangle]
             fn comp_u1024(x: U1024, y: U1024) -> U1024 {
                 let z = (x + y) * x;
                 z
@@ -2365,6 +2375,8 @@ mod test {
 
         #[cfg(feature = "simulator")]
         let expected_output = quote! {
+            #[inline(always)]
+            #[no_mangle]
             fn comp_u1024(x: U1024, y: U1024) -> U1024 {
                 let z = (x.overflowing_add(y).0).overflowing_mul(x).0;
                 z
@@ -2373,6 +2385,8 @@ mod test {
 
         #[cfg(not(feature = "simulator"))]
         let expected_output = quote! {
+            #[inline(always)]
+            #[no_mangle]
             fn comp_u1024(x: U1024, y: U1024) -> U1024 {
                 let z = {
                     unsafe {
