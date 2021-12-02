@@ -2245,7 +2245,7 @@ mod test {
                     unsafe {
                         asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 211u8 , const 2u8 , const 16u8 ,)
                     }
-                    core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
+                    unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
                 };
                 if {
                     unsafe {
@@ -2277,8 +2277,8 @@ mod test {
                         unsafe {
                             asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 213u8 , const 2u8 , const 16u8 ,)
                         }
-                        core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
-                    }
+                        unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
+                    };
                 }
                 z = {
                     unsafe {
@@ -2291,7 +2291,7 @@ mod test {
                     unsafe {
                         asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 214u8 , const 2u8 , const 16u8 ,)
                     }
-                    core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
+                    unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
                 };
                 let abc = 3456;
                 z = ({
@@ -2311,7 +2311,7 @@ mod test {
                     unsafe {
                         asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 216u8 , const 2u8 , const 16u8 ,)
                     }
-                    core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
+                    unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
                 });
                 z = {
                     unsafe {
@@ -2321,7 +2321,7 @@ mod test {
                     unsafe {
                         asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 167u8 , const 216u8 , const 2u8 , const 16u8 ,)
                     }
-                    core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf)
+                    unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
                 };
                 unsafe {
                     asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 1u8 , const 17u8 , const 8u8 ,)
@@ -2394,7 +2394,7 @@ mod test {
                     unsafe {
                         asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 167u8 , const 241u8 , const 2u8 , const 16u8 ,)
                     }
-                    core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf)
+                    unsafe { core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf) }
                 };
                 z
             }
@@ -2453,7 +2453,7 @@ mod test {
                         unsafe {
                             asm ! ("mv {0}, t0" , "mv t2, {1}" , ".byte {2}, {3}, {4}, {5}" , out (reg) tmp_bool_t0 , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 242u8 , const 3u8 , const 16u8 ,)
                         }
-                        let tmp_uint_rv = core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf);
+                        let tmp_uint_rv = unsafe { core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf) };
                         if tmp_bool_t0 == 0 {
                             let tmp_bool_t1: i64;
                             unsafe {
@@ -2489,7 +2489,7 @@ mod test {
                             unsafe {
                                 asm ! (".byte {0}, {1}, {2}, {3}" "mv t1, {4}" , ".byte {5}, {6}, {7}, {8}" , const 87u8 , const 164u8 , const 99u8 , const 128u8 , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 116u8 , const 3u8 , const 16u8 ,)
                             }
-                            Some(core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf))
+                            Some(unsafe { core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf) })
                         }
                     }
                 };
