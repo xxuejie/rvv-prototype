@@ -38,7 +38,7 @@ macro_rules! print {
 #[rvv_vector(show_asm)]
 #[inline(always)]
 #[no_mangle]
-pub fn bn256_add(mut ax: U256, bx: U256, cx: U256) -> U256 {
+pub fn simple_ops(mut ax: U256, bx: U256, cx: U256) -> U256 {
     if ax > bx && bx == cx {
         ax = ax * (cx + bx);
     }
@@ -47,7 +47,7 @@ pub fn bn256_add(mut ax: U256, bx: U256, cx: U256) -> U256 {
 }
 
 #[cfg(not(feature = "use_rvv_vector"))]
-pub fn bn256_add(mut ax: U256, bx: U256, cx: U256) -> U256 {
+pub fn simple_ops(mut ax: U256, bx: U256, cx: U256) -> U256 {
     if ax > bx && bx == cx {
         ax = ax.wrapping_mul(cx.wrapping_add(bx));
     }
