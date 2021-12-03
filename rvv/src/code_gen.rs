@@ -219,6 +219,10 @@ pub struct CodegenContext {
     // Add original asm to generated code
     #[allow(dead_code)]
     show_asm: bool,
+
+    // (arg_name, arg_type_name)
+    #[cfg(not(feature = "simulator"))]
+    fn_args: Option<Vec<FnArg>>,
 }
 
 impl CodegenContext {
@@ -237,6 +241,8 @@ impl CodegenContext {
             #[cfg(not(feature = "simulator"))]
             v_config: None,
             show_asm,
+            #[cfg(not(feature = "simulator"))]
+            fn_args: None,
         }
     }
 
@@ -560,36 +566,6 @@ impl CodegenContext {
         extra_bind_id: Option<usize>,
         mut bit_length: u16,
     ) -> Result<TokenStream, SpannedError> {
-        fn update_vconfig(tokens: &mut TokenStream, bit_length: u16, context: &mut CodegenContext) {
-            // vsetvli x0, t0, e{256,512,1024}, m1, ta, ma
-            let v_config = VConfig::Vsetvli {
-                rd: XReg::Zero,
-                rs1: XReg::T0,
-                vtypei: Vtypei::new(bit_length, Vlmul::M1, true, true),
-            };
-            if context.v_config.as_ref() != Some(&v_config) {
-                context.v_config = Some(v_config);
-                let inst = VInst::VConfig(v_config);
-                let [b0, b1, b2, b3] = inst.encode_bytes();
-                if context.show_asm {
-                    let comment = format!("{} - {}", inst.encode_u32(), inst);
-                    tokens.extend(Some(quote! {
-                        let _ = #comment;
-                    }));
-                }
-                let ts = quote! {
-                    unsafe {
-                        asm!(
-                            "li t0, 1",  // AVL = 1
-                            ".byte {0}, {1}, {2}, {3}",
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                };
-                tokens.extend(Some(ts));
-            }
-        }
-
         let receiver_bit_length: u16 = match receiver.type_name().as_deref() {
             Some("U256") => 256,
             Some("U512") => 512,
@@ -628,7 +604,7 @@ impl CodegenContext {
             }
         }
 
-        update_vconfig(&mut tokens, bit_length, self);
+        self.update_vconfig(&mut tokens, bit_length);
 
         let left = &receiver;
         let right = &args[0];
@@ -928,6 +904,37 @@ impl CodegenContext {
             Ok(rv)
         } else {
             Ok(tokens)
+        }
+    }
+
+    #[cfg(not(feature = "simulator"))]
+    fn update_vconfig(&mut self, tokens: &mut TokenStream, bit_length: u16) {
+        // vsetvli x0, t0, e{256,512,1024}, m1, ta, ma
+        let v_config = VConfig::Vsetvli {
+            rd: XReg::Zero,
+            rs1: XReg::T0,
+            vtypei: Vtypei::new(bit_length, Vlmul::M1, true, true),
+        };
+        if self.v_config.as_ref() != Some(&v_config) {
+            self.v_config = Some(v_config);
+            let inst = VInst::VConfig(v_config);
+            let [b0, b1, b2, b3] = inst.encode_bytes();
+            if self.show_asm {
+                let comment = format!("{} - {}", inst.encode_u32(), inst);
+                tokens.extend(Some(quote! {
+                    let _ = #comment;
+                }));
+            }
+            let ts = quote! {
+                unsafe {
+                    asm!(
+                        "li t0, 1",  // AVL = 1
+                        ".byte {0}, {1}, {2}, {3}",
+                        const #b0, const #b1, const #b2, const #b3,
+                    )
+                }
+            };
+            tokens.extend(Some(ts));
         }
     }
 
@@ -1341,33 +1348,7 @@ impl CodegenContext {
                 }
             };
         }
-        // vsetvli x0, t0, e{256,512,1024}, m1, ta, ma
-        let v_config = VConfig::Vsetvli {
-            rd: XReg::Zero,
-            rs1: XReg::T0,
-            vtypei: Vtypei::new(bit_length, Vlmul::M1, true, true),
-        };
-        if self.v_config.as_ref() != Some(&v_config) {
-            self.v_config = Some(v_config);
-            let inst = VInst::VConfig(v_config);
-            let [b0, b1, b2, b3] = inst.encode_bytes();
-            if self.show_asm {
-                let comment = format!("{} - {}", inst.encode_u32(), inst);
-                tokens.extend(Some(quote! {
-                    let _ = #comment;
-                }));
-            }
-            let ts = quote! {
-                unsafe {
-                    asm!(
-                        "li t0, 1",  // AVL = 1
-                        ".byte {0}, {1}, {2}, {3}",
-                        const #b0, const #b1, const #b2, const #b3,
-                    )
-                }
-            };
-            tokens.extend(Some(ts));
-        }
+        self.update_vconfig(&mut tokens, bit_length);
 
         for typed_expr in [left, right] {
             if let Some(var_ident) = typed_expr.expr.0.var_ident() {
@@ -2012,6 +1993,68 @@ impl ToTokenStream for Block {
     ) -> Result<(), SpannedError> {
         catch_inner_error(|err| {
             token::Brace::default().surround(tokens, |inner| {
+                #[cfg(not(feature = "simulator"))]
+                if let Some(fn_args) = context.fn_args.take() {
+                    let mut args = fn_args
+                        .into_iter()
+                        .filter_map(|fn_arg| {
+                            let bit_length: u16 = match fn_arg.ty.0.type_name().as_deref() {
+                                Some("U256") => 256,
+                                Some("U512") => 512,
+                                Some("U1024") => 1024,
+                                _ => 0,
+                            };
+                            if bit_length > 0 {
+                                Some((fn_arg, bit_length))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    args.sort_unstable_by_key(|(_, bit_length)| *bit_length);
+
+                    for (fn_arg, bit_length) in args {
+                        context.update_vconfig(inner, bit_length);
+                        // Load{256,512,1024}
+                        let vreg = match context.v_registers.next_register() {
+                            Some(vreg) => vreg,
+                            None => {
+                                *err = Some((
+                                    fn_arg.span,
+                                    anyhow!("not enough V register for function argument"),
+                                ));
+                                return;
+                            }
+                        };
+                        // FIXME: t0 register may already used by Rust code
+                        let inst = VInst::VleV {
+                            width: bit_length,
+                            vd: VReg::from_u8(vreg),
+                            rs1: XReg::T0,
+                            vm: false,
+                        };
+                        let [b0, b1, b2, b3] = inst.encode_bytes();
+                        if context.show_asm {
+                            let comment = format!("{} - {}", inst.encode_u32(), inst);
+                            inner.extend(Some(quote! {
+                                let _ = #comment;
+                            }));
+                        }
+                        let var_ident = fn_arg.name;
+                        let ts = quote! {
+                            unsafe {
+                                asm!(
+                                    "mv t0, {0}",
+                                    ".byte {1}, {2}, {3}, {4}",
+                                    in(reg) #var_ident.as_ref().as_ptr(),
+                                    const #b0, const #b1, const #b2, const #b3,
+                                )
+                            }
+                        };
+                        inner.extend(Some(ts));
+                        context.var_regs.insert(var_ident.clone(), vreg);
+                    }
+                }
                 for stmt in &self.stmts {
                     if let Err(inner_err) = stmt.0.to_tokens(inner, context) {
                         *err = Some(inner_err);
@@ -2070,15 +2113,16 @@ impl ToTokenStream for ItemFn {
         context: &mut CodegenContext,
     ) -> Result<(), SpannedError> {
         for attr in &self.attrs {
-            match attr.style {
-                syn::AttrStyle::Outer => {
-                    attr.to_tokens(tokens);
-                }
-                _ => {}
+            if let syn::AttrStyle::Outer = attr.style {
+                attr.to_tokens(tokens);
             }
         }
         self.vis.to_tokens(tokens);
         self.sig.to_tokens(tokens, context)?;
+        #[cfg(not(feature = "simulator"))]
+        {
+            context.fn_args = Some(self.sig.inputs.clone());
+        }
         self.block.to_tokens(tokens, context)?;
         Ok(())
     }
