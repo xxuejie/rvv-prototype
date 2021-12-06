@@ -17,20 +17,13 @@ rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
 
 [features]
 default = []
-use_rvv_vector = []
 simulator = ["rvv/simulator"]
 
 [[bin]]
 path = "src/main.rs"
 name = "rvv-tests-simulator"
-required-features = ["simulator", "use_rvv_vector"]
+required-features = ["simulator"]
 
 [[bin]]
 path = "src/main.rs"
 name = "rvv-tests-rvv-asm"
-required-features = ["use_rvv_vector"]
-
-[[bin]]
-path = "src/main.rs"
-name = "rvv-tests-raw"
-required-features = []

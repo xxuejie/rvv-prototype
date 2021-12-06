@@ -3,24 +3,21 @@
 
 extern crate alloc;
 
-#[cfg(feature = "use_rvv_vector")]
-use rvv::rvv_vector;
+pub mod cases;
 
-use rvv_simulator_runtime::Uint;
-
-pub type U256 = Uint<4>;
-pub type U512 = Uint<8>;
+pub type U256 = rvv_simulator_runtime::Uint<4>;
+pub type U512 = rvv_simulator_runtime::Uint<8>;
 
 #[macro_export]
 macro_rules! U256 {
     ($e: expr) => {
-        Uint::<4>($e)
+        rvv_simulator_runtime::Uint::<4>($e)
     };
 }
 #[macro_export]
 macro_rules! U512 {
     ($e: expr) => {
-        Uint::<8>($e)
+        rvv_simulator_runtime::Uint::<8>($e)
     };
 }
 
@@ -34,23 +31,25 @@ macro_rules! print {
     };
 }
 
-#[cfg(feature = "use_rvv_vector")]
-#[rvv_vector(show_asm)]
-#[inline(always)]
-#[no_mangle]
-pub fn simple_ops(mut ax: U256, bx: U256, cx: U256) -> U256 {
-    if ax > bx && bx == cx {
-        ax = ax * (cx + bx);
-    }
-    ax = (ax + bx) * cx;
-    ax
-}
-
-#[cfg(not(feature = "use_rvv_vector"))]
-pub fn simple_ops(mut ax: U256, bx: U256, cx: U256) -> U256 {
-    if ax > bx && bx == cx {
-        ax = ax.wrapping_mul(cx.wrapping_add(bx));
-    }
-    ax = (ax.wrapping_add(bx)).wrapping_mul(cx);
-    ax
+#[macro_export]
+macro_rules! print_assert_eq {
+    ($left:expr, $right:expr, Uint) => {
+        match (&$left, &$right) {
+            (left_val, right_val) => {
+                print_assert_eq!(left_val.0, right_val.0);
+            }
+        }
+    };
+    ($left:expr, $right:expr) => {
+        match (&$left, &$right) {
+            (left_val, right_val) => {
+                if !(*left_val == *right_val) {
+                    $crate::print!("{}:{}:{}", file!(), line!(), column!());
+                    $crate::print!(" left: {:?}", left_val);
+                    $crate::print!("right: {:?}", right_val);
+                }
+                assert_eq!(left_val, right_val);
+            }
+        }
+    };
 }
