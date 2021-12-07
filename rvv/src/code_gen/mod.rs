@@ -623,7 +623,7 @@ impl ToTokenStream for Block {
                             }
                         })
                         .collect::<Vec<_>>();
-                    args.sort_unstable_by_key(|(_, bit_length)| *bit_length);
+                    args.sort_by_key(|(_, bit_length)| *bit_length);
 
                     for (fn_arg, bit_length) in args {
                         context.update_vconfig(inner, bit_length);
@@ -742,6 +742,7 @@ impl ToTokenStream for ItemFn {
 
 #[cfg(test)]
 mod test {
+    use quote::quote;
     use std::convert::TryFrom;
 
     use super::*;
@@ -874,135 +875,135 @@ mod test {
         #[cfg(not(feature = "simulator"))]
         let expected_output = quote! {
             fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
+                unsafe {
+                    asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 14u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.as_ref().as_ptr(), const 7u8, const 208u8, const 2u8, const 16u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.as_ref().as_ptr(), const 135u8, const 208u8, const 2u8, const 16u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) z.as_ref().as_ptr(), const 7u8, const 209u8, const 2u8, const 16u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) w.as_ref().as_ptr(), const 135u8, const 209u8, const 2u8, const 16u8 ,)
+                }
                 let x_bytes = x.to_le_bytes();
                 let j = {
                     unsafe {
-                        asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 14u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 162u8, const 32u8, const 148u8 ,)
                     }
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 7u8 , const 208u8 , const 2u8 , const 16u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 162u8, const 65u8, const 128u8 ,)
                     }
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) z . as_ref () . as_ptr () , const 135u8 , const 208u8 , const 2u8 , const 16u8 ,)
-                    }
-                    unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) y . as_ref () . as_ptr () , const 7u8 , const 209u8 , const 2u8 , const 16u8 ,)
-                    }
-                    unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 33u8 , const 17u8 , const 148u8 ,)
-                    }
-                    unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) w . as_ref () . as_ptr () , const 7u8 , const 210u8 , const 2u8 , const 16u8 ,)
-                    }
-                    unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 34u8 , const 50u8 , const 128u8 ,)
-                    }
-                    unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 131u8 , const 2u8 , const 0u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 131u8, const 2u8, const 0u8 ,)
                     }
                     let mut tmp_rvv_vector_buf = [0u8; 32usize];
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 211u8 , const 2u8 , const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 39u8, const 211u8, const 2u8, const 16u8 ,)
                     }
-                    unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
+                    unsafe { core::mem::transmute::<[u8; 32usize], U256>(tmp_rvv_vector_buf) }
                 };
                 if {
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 3u8 , const 32u8 , const 104u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 3u8, const 16u8, const 104u8 ,)
                     }
                     let tmp_bool_t0: i64;
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , "mv {4}, t0" , const 215u8 , const 162u8 , const 120u8 , const 64u8 , out (reg) tmp_bool_t0 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", "mv {4}, t0", const 215u8, const 162u8, const 120u8, const 64u8, out (reg) tmp_bool_t0 ,)
                     }
                     tmp_bool_t0 == 0
                 } && {
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 132u8 , const 32u8 , const 96u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 4u8, const 17u8, const 96u8 ,)
                     }
                     let tmp_bool_t0: i64;
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , "mv {4}, t0" , const 215u8 , const 162u8 , const 136u8 , const 64u8 , out (reg) tmp_bool_t0 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", "mv {4}, t0", const 215u8, const 162u8, const 136u8, const 64u8, out (reg) tmp_bool_t0 ,)
                     }
                     tmp_bool_t0 == 0
                 } {
                     z = {
                         unsafe {
-                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 4u8 , const 17u8 , const 40u8 ,)
+                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 132u8, const 32u8, const 40u8 ,)
                         }
                         unsafe {
-                            asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 133u8 , const 4u8 , const 36u8 ,)
+                            asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 133u8, const 4u8, const 36u8 ,)
                         }
                         let mut tmp_rvv_vector_buf = [0u8; 32usize];
                         unsafe {
-                            asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 213u8 , const 2u8 , const 16u8 ,)
+                            asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 39u8, const 213u8, const 2u8, const 16u8 ,)
                         }
-                        unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
+                        unsafe { core::mem::transmute::<[u8; 32usize], U256>(tmp_rvv_vector_buf) }
                     };
                 }
                 z = {
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 5u8 , const 1u8 , const 8u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 133u8, const 0u8, const 8u8 ,)
                     }
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 38u8 , const 176u8 , const 148u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 38u8, const 176u8, const 148u8 ,)
                     }
                     let mut tmp_rvv_vector_buf = [0u8; 32usize];
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 214u8 , const 2u8 , const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 39u8, const 214u8, const 2u8, const 16u8 ,)
                     }
-                    unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
+                    unsafe { core::mem::transmute::<[u8; 32usize], U256>(tmp_rvv_vector_buf) }
                 };
                 let abc = 3456;
                 z = ({
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) j . as_ref () . as_ptr () , const 135u8 , const 214u8 , const 2u8 , const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) j.as_ref().as_ptr(), const 135u8, const 214u8, const 2u8, const 16u8 ,)
                     }
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 7u8 , const 32u8 , const 8u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 7u8, const 16u8, const 8u8 ,)
                     }
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 39u8 , const 215u8 , const 148u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 39u8, const 215u8, const 148u8 ,)
                     }
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 136u8 , const 39u8 , const 0u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 136u8, const 23u8, const 0u8 ,)
                     }
                     let mut tmp_rvv_vector_buf = [0u8; 32usize];
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 216u8 , const 2u8 , const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 39u8, const 216u8, const 2u8, const 16u8 ,)
                     }
-                    unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
+                    unsafe { core::mem::transmute::<[u8; 32usize], U256>(tmp_rvv_vector_buf) }
                 });
                 z = {
                     unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 136u8 , const 16u8 , const 0u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 8u8, const 33u8, const 0u8 ,)
                     }
                     let mut tmp_rvv_vector_buf = [0u8; 32usize];
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 167u8 , const 216u8 , const 2u8 , const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 167u8, const 216u8, const 2u8, const 16u8 ,)
                     }
-                    unsafe { core::mem::transmute::<[u8 ; 32usize], U256>(tmp_rvv_vector_buf) }
+                    unsafe { core::mem::transmute::<[u8; 32usize], U256>(tmp_rvv_vector_buf) }
                 };
                 unsafe {
-                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 1u8 , const 17u8 , const 8u8 ,)
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 8u8 ,)
                 };
                 unsafe {
-                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 33u8 , const 17u8 , const 148u8 ,)
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 160u8, const 32u8, const 148u8 ,)
                 };
                 unsafe {
-                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 1u8 , const 17u8 , const 0u8 ,)
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 0u8 ,)
                 };
                 unsafe {
-                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 33u8 , const 17u8 , const 136u8 ,)
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 160u8, const 32u8, const 136u8 ,)
                 };
                 unsafe {
-                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 1u8 , const 17u8 , const 160u8 ,)
+                    asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 128u8, const 32u8, const 160u8 ,)
                 };
                 let zero = U256::zero();
                 unsafe {
-                    asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) zero . as_ref () . as_ptr () , const 7u8 , const 217u8 , const 2u8 , const 16u8 ,)
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) zero.as_ref().as_ptr(), const 7u8, const 217u8, const 2u8, const 16u8 ,)
                 }
                 unsafe {
-                    asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 41u8 , const 25u8 , const 128u8 ,)
+                    asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 41u8, const 41u8, const 128u8 ,)
                 };
                 z
             }
@@ -1039,25 +1040,25 @@ mod test {
             #[inline(always)]
             #[no_mangle]
             fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                unsafe {
+                    asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.as_ref().as_ptr(), const 7u8, const 240u8, const 2u8, const 16u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.as_ref().as_ptr(), const 135u8, const 240u8, const 2u8, const 16u8 ,)
+                }
                 let z = {
                     unsafe {
-                        asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 129u8, const 0u8, const 0u8 ,)
                     }
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 7u8 , const 240u8 , const 2u8 , const 16u8 ,)
-                    }
-                    unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) y . as_ref () . as_ptr () , const 135u8 , const 240u8 , const 2u8 , const 16u8 ,)
-                    }
-                    unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 129u8 , const 0u8 , const 0u8 ,)
-                    }
-                    unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 33u8 , const 32u8 , const 148u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 33u8, const 32u8, const 148u8 ,)
                     }
                     let mut tmp_rvv_vector_buf = [0u8; 128usize];
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 167u8 , const 241u8 , const 2u8 , const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 167u8, const 241u8, const 2u8, const 16u8 ,)
                     }
                     unsafe { core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf) }
                 };
@@ -1099,42 +1100,46 @@ mod test {
         #[cfg(not(feature = "simulator"))]
         let expected_output = quote! {
             fn comp_u1024(a: U1024, b: U1024, c: U1024, d: U1024) -> U1024 {
+                unsafe {
+                    asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) a.as_ref().as_ptr(), const 7u8, const 240u8, const 2u8, const 16u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) b.as_ref().as_ptr(), const 135u8, const 240u8, const 2u8, const 16u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) c.as_ref().as_ptr(), const 7u8, const 241u8, const 2u8, const 16u8 ,)
+                }
+                unsafe {
+                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) d.as_ref().as_ptr(), const 135u8, const 241u8, const 2u8, const 16u8 ,)
+                }
                 let x_tuple = {
                     unsafe {
-                        asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
-                    }
-                    unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) a . as_ref () . as_ptr () , const 7u8 , const 240u8 , const 2u8 , const 16u8 ,)
-                    }
-                    unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) b . as_ref () . as_ptr () , const 135u8 , const 240u8 , const 2u8 , const 16u8 ,)
-                    }
-                    unsafe {
-                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 129u8 , const 0u8 , const 0u8 ,)
-                    }
-                    unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) c . as_ref () . as_ptr () , const 135u8 , const 241u8 , const 2u8 , const 16u8 ,)
+                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 130u8, const 0u8, const 0u8 ,)
                     }
                     {
                         unsafe {
-                            asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 162u8 , const 33u8 , const 148u8 ,)
+                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 34u8, const 65u8, const 148u8 ,)
                         }
                         unsafe {
-                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 50u8 , const 64u8 , const 100u8 ,)
+                            asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 51u8, const 80u8, const 100u8 ,)
                         }
                         unsafe {
-                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 162u8 , const 88u8 , const 64u8 ,)
+                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 162u8, const 104u8, const 64u8 ,)
                         }
                         let tmp_bool_t0: i64;
                         let mut tmp_rvv_vector_buf = [0u8; 128usize];
                         unsafe {
-                            asm ! ("mv {0}, t0" , "mv t2, {1}" , ".byte {2}, {3}, {4}, {5}" , out (reg) tmp_bool_t0 , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 242u8 , const 3u8 , const 16u8 ,)
+                            asm!("mv {0}, t0", "mv t2, {1}", ".byte {2}, {3}, {4}, {5}", out (reg) tmp_bool_t0, in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 167u8, const 242u8, const 3u8, const 16u8 ,)
                         }
-                        let tmp_uint_rv = unsafe { core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf) };
+                        let tmp_uint_rv =
+                            unsafe { core::mem::transmute::<[u8; 128usize], U1024>(tmp_rvv_vector_buf) };
                         if tmp_bool_t0 == 0 {
                             let tmp_bool_t1: i64;
                             unsafe {
-                                asm ! (".byte {0}, {1}, {2}, {3}" , ".byte {4}, {5}, {6}, {7}" , ".byte {8}, {9}, {10}, {11}" , "mv {12}, t1" , const 215u8 , const 34u8 , const 65u8 , const 128u8 , const 215u8 , const 130u8 , const 81u8 , const 100u8 , const 87u8 , const 163u8 , const 88u8 , const 64u8 , out (reg) tmp_bool_t1 ,)
+                                asm!(".byte {0}, {1}, {2}, {3}", ".byte {4}, {5}, {6}, {7}", ".byte {8}, {9}, {10}, {11}", "mv {12}, t1", const 87u8, const 35u8, const 82u8, const 128u8, const 87u8, const 3u8, const 97u8, const 100u8, const 87u8, const 163u8, const 104u8, const 64u8, out (reg) tmp_bool_t1 ,)
                             }
                             (tmp_uint_rv, tmp_bool_t1 == 0)
                         } else {
@@ -1145,28 +1150,25 @@ mod test {
                 let x = x_tuple.0;
                 let z_opt = {
                     unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 7u8 , const 243u8 , const 2u8 , const 16u8 ,)
-                    }
-                    unsafe {
-                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) d . as_ref () . as_ptr () , const 135u8 , const 243u8 , const 2u8 , const 16u8 ,)
+                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.as_ref().as_ptr(), const 135u8, const 243u8, const 2u8, const 16u8 ,)
                     }
                     {
                         unsafe {
-                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 52u8 , const 112u8 , const 96u8 ,)
+                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 52u8, const 48u8, const 96u8 ,)
                         }
                         unsafe {
-                            asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 162u8 , const 152u8 , const 64u8 ,)
+                            asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 162u8, const 152u8, const 64u8 ,)
                         }
                         let tmp_bool_var: i64;
-                        unsafe { asm ! ("mv {0}, t0" , out (reg) tmp_bool_var ,) }
+                        unsafe { asm!("mv {0}, t0", out (reg) tmp_bool_var ,) }
                         if tmp_bool_var == 0 {
                             None
                         } else {
                             let mut tmp_rvv_vector_buf = [0u8; 128usize];
                             unsafe {
-                                asm ! (".byte {0}, {1}, {2}, {3}" "mv t1, {4}" , ".byte {5}, {6}, {7}, {8}" , const 87u8 , const 164u8 , const 99u8 , const 128u8 , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 116u8 , const 3u8 , const 16u8 ,)
+                                asm!(".byte {0}, {1}, {2}, {3}", "mv t1, {4}", ".byte {5}, {6}, {7}, {8}", const 87u8, const 164u8, const 113u8, const 128u8, in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 39u8, const 116u8, const 3u8, const 16u8 ,)
                             }
-                            Some(unsafe { core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf) })
+                            Some(unsafe { core::mem::transmute::<[u8; 128usize], U1024>(tmp_rvv_vector_buf) })
                         }
                     }
                 };
