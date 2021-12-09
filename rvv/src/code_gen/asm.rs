@@ -486,7 +486,6 @@ impl CodegenContext {
                 .map_err(|err| (expr.expr.1, err))?;
             }
 
-            // FIXME: current impl is wrong
             /*
             vmsltu.vv v4, v2, v3
             vfirst.m t0, v4
