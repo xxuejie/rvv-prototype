@@ -12,16 +12,29 @@ impl CodegenContext {
         expr: &TypedExpression,
         top_level: bool,
         extra_bind_id: Option<usize>,
+        _exists_vd: Option<u8>,
         mut bit_length: u16,
     ) -> Result<TokenStream, SpannedError> {
         let (left, op, right, is_assign) = match &expr.expr.0 {
+            Expression::Assign { left, right, .. } => {
+                let mut tokens = TokenStream::new();
+                left.to_tokens(&mut tokens, self)?;
+                syn::token::Eq::default().to_tokens(&mut tokens);
+                right.to_tokens(&mut tokens, self)?;
+                return Ok(tokens)
+            }
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
+            Expression::Path(path) => {
+                let mut tokens = TokenStream::new();
+                path.to_tokens(&mut tokens);
+                return Ok(tokens);
+            }
             Expression::MethodCall { receiver, method, args, .. } => {
                 return self.default_method_call_codegen(receiver, method, args);
             }
             Expression::Paren { expr: sub_expr, .. } => {
-                let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length)?;
+                let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), None, bit_length)?;
                 return Ok(quote! {(#ts)});
             }
             _  => return Err((expr.expr.1, anyhow!("invalid expression, inner expression must be simple variable name or binary op"))),
@@ -74,7 +87,7 @@ impl CodegenContext {
                 self.expr_tokens
                     .insert(typed_expr.id, (quote! {#var_ident}, bit_length));
             } else {
-                let _ts = self.gen_tokens(typed_expr, false, None, bit_length)?;
+                let _ts = self.gen_tokens(typed_expr, false, None, None, bit_length)?;
             }
         }
 

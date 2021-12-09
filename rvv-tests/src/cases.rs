@@ -15,7 +15,7 @@ pub fn run_all_test_cases() {
 #[inline(always)]
 #[no_mangle]
 fn simple_mixed_ops(mut a: U256, b: U256, c: U256) -> U256 {
-    if a > b && b == c {
+    if b > a && b >= c {
         a = a * (c + b);
     }
     a = (a + b) * c;
@@ -23,7 +23,7 @@ fn simple_mixed_ops(mut a: U256, b: U256, c: U256) -> U256 {
 }
 
 fn simple_mixed_ops_raw(mut a: U256, b: U256, c: U256) -> U256 {
-    if a > b && b == c {
+    if b > a && b >= c {
         a = a.wrapping_mul(c.wrapping_add(b));
     }
     a = (a.wrapping_add(b)).wrapping_mul(c);
