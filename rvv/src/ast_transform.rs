@@ -612,6 +612,7 @@ impl TryFrom<&syn::ItemFn> for ItemFn {
     fn try_from(item_fn: &syn::ItemFn) -> Result<ItemFn, SpannedError> {
         Ok(ItemFn {
             span: item_fn.span().into(),
+            attrs: item_fn.attrs.clone(),
             vis: item_fn.vis.clone(),
             sig: Signature::try_from(&item_fn.sig)?,
             block: Block::try_from(&*item_fn.block)?,
