@@ -12,7 +12,7 @@ use crate::SpannedError;
 pub struct VarInfo {
     pub span: Span,
     pub mut_token: Option<Span>,
-    pub ty: Box<WithSpan<Type>>,
+    pub ty: Option<Box<WithSpan<Type>>>,
     // indicate the varable liftime
     pub start_expr_id: usize,
     pub end_expr_id: usize,
@@ -22,7 +22,7 @@ impl VarInfo {
     pub fn new(
         span: Span,
         mut_token: Option<Span>,
-        ty: Box<WithSpan<Type>>,
+        ty: Option<Box<WithSpan<Type>>>,
         start_expr_id: usize,
     ) -> VarInfo {
         VarInfo {
@@ -33,7 +33,8 @@ impl VarInfo {
             end_expr_id: start_expr_id,
         }
     }
-    #[cfg(not(feature = "simulator"))]
+
+    #[allow(dead_code)]
     pub fn is_unused(&self) -> bool {
         self.start_expr_id == self.end_expr_id
     }
@@ -415,7 +416,7 @@ impl TypeChecker for TypedExpression {
             Expression::Path(path) => match path.get_ident() {
                 Some(ident) => {
                     let current_expr_id = context.expr_id;
-                    context.variables.get_mut(ident).map(|info| {
+                    context.variables.get_mut(ident).and_then(|info| {
                         info.end_expr_id = current_expr_id;
                         info.ty.clone()
                     })
@@ -454,12 +455,10 @@ impl TypeChecker for Statement {
                                 ),
                             ));
                         }
-                        if let Some(ty) = init.ty.clone() {
-                            context.variables.insert(
-                                (*ident).clone(),
-                                VarInfo::new(pat.1, *mutability, ty, context.expr_id),
-                            );
-                        }
+                        context.variables.insert(
+                            (*ident).clone(),
+                            VarInfo::new(pat.1, *mutability, init.ty.clone(), context.expr_id),
+                        );
                     }
                     Pattern::Type { pat, ty, .. } => {
                         if let Pattern::Ident { mutability, ident } = &pat.0 {
@@ -470,7 +469,12 @@ impl TypeChecker for Statement {
                                 .variables
                                 .insert(
                                     ident.clone(),
-                                    VarInfo::new(pat.1, *mutability, ty.clone(), context.expr_id),
+                                    VarInfo::new(
+                                        pat.1,
+                                        *mutability,
+                                        Some(ty.clone()),
+                                        context.expr_id,
+                                    ),
                                 )
                                 .is_some()
                             {
@@ -520,7 +524,7 @@ impl TypeChecker for Signature {
                 VarInfo::new(
                     input.span,
                     input.mutability,
-                    input.ty.clone(),
+                    Some(input.ty.clone()),
                     context.expr_id,
                 ),
             );

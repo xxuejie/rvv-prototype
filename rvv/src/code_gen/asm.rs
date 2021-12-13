@@ -276,7 +276,12 @@ impl CodegenContext {
             }
             OpCategory::Binary | OpCategory::AssignOp => Ok(tokens),
             OpCategory::Bool => {
-                let RegInfo { number: vreg, .. } = *self.expr_regs.get(&expr.id).unwrap();
+                let vreg = {
+                    let reg_info = self.expr_regs.get_mut(&expr.id).unwrap();
+                    self.v_registers.free(reg_info.number);
+                    reg_info.is_freed = true;
+                    reg_info.number
+                };
                 let inst = VInst::VfirstM {
                     rd: XReg::T0,
                     vs2: VReg::from_u8(vreg),
@@ -287,7 +292,7 @@ impl CodegenContext {
                     let comment = format!("{} - {}", inst, inst.encode_u32());
                     tokens.extend(Some(quote! {
                         let _ = #comment;
-                        let _ = "mv {tmp_rv_t0}, t0";
+                        let _ = "mv {tmp_bool_t0}, t0";
                     }));
                 }
                 tokens.extend(Some(quote! {
@@ -716,7 +721,7 @@ impl CodegenContext {
             let sub_reg_info = self.expr_regs.get_mut(sub_expr_id).unwrap();
             let should_free = if let Some(var_ident) = sub_reg_info.var_ident.as_ref() {
                 let var_info = self.variables.get(var_ident).unwrap();
-                var_info.end_expr_id == current_expr_id
+                var_info.end_expr_id <= current_expr_id
             } else {
                 true
             };
@@ -775,7 +780,7 @@ impl CodegenContext {
             let comment1 = format!("{} - {}", inst.encode_u32(), inst);
             let comment2 = "mv t1, {tmp_rvv_vector_buf}";
             let comment3 = format!("{} - {}", inst_store.encode_u32(), inst_store);
-            tokens.extend(Some(quote! {
+            inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
                 let _ = #comment2;
@@ -861,7 +866,7 @@ impl CodegenContext {
             let comment1 = format!("{} - {}", inst.encode_u32(), inst);
             let comment2 = "mv t1, {tmp_rvv_vector_buf}";
             let comment3 = format!("{} - {}", inst_store.encode_u32(), inst_store);
-            tokens.extend(Some(quote! {
+            inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
                 let _ = #comment2;
@@ -1013,7 +1018,7 @@ impl CodegenContext {
             let comment0 = "mv {tmp_bool_t0}, t0";
             let comment1 = "mv t2, {tmp_rvv_vector_buf}";
             let comment2 = format!("{} - {}", inst_store.encode_u32(), inst_store);
-            tokens.extend(Some(quote! {
+            inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
                 let _ = #comment2;
@@ -1040,7 +1045,7 @@ impl CodegenContext {
             let comment1 = format!("{} - {}", inst_ne.encode_u32(), inst_ne);
             let comment2 = format!("{} - {}", inst_firstm.encode_u32(), inst_firstm);
             let comment3 = "mv {tmp_bool_t1}, t1";
-            tokens.extend(Some(quote! {
+            inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
                 let _ = #comment2;
