@@ -10,9 +10,10 @@ use quote::ToTokens;
 use syn::token;
 
 use crate::ast::{
-    BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Span, Statement,
-    Type, TypedExpression, WithSpan,
+    BareFnArg, Block, Expression, FnArg, ItemFn, Pattern, ReturnType, Signature, Statement, Type,
+    TypedExpression,
 };
+use crate::type_checker::VarInfo;
 use crate::SpannedError;
 #[cfg(not(feature = "simulator"))]
 use rvv_assembler::{VConfig, VInst, VReg, XReg};
@@ -29,26 +30,41 @@ mod simulator;
 #[derive(Default)]
 pub struct Registers {
     pub category: &'static str,
-    pub max_number: u8,
-    pub last_number: u8,
+    pub items: [bool; 32],
 }
 
 impl Registers {
-    pub fn new(category: &'static str, max_number: u8) -> Registers {
-        Registers {
-            category,
-            max_number,
-            last_number: 0,
+    pub fn new(category: &'static str, pre_alloced: Vec<usize>) -> Registers {
+        let mut items = [false; 32];
+        for idx in pre_alloced {
+            items[idx] = true;
         }
+        Registers { category, items }
     }
 
-    pub fn next_register(&mut self) -> Option<u8> {
-        if self.last_number < self.max_number {
-            let value = self.last_number;
-            self.last_number += 1;
-            return Some(value);
+    pub fn alloc(&mut self) -> Option<u8> {
+        // skip v0 register
+        for i in 1..32 {
+            if !self.items[i] {
+                self.items[i] = true;
+                return Some(i as u8);
+            }
         }
         None
+    }
+    // Regsiter should be free when:
+    //  * variable register reach it's lifetime end
+    //  * expression register when after be used in outter expression
+    //  * expression register be stored to variable (top level expression)
+    #[cfg(not(feature = "simulator"))]
+    pub fn free(&mut self, index: u8) {
+        if index >= 32 {
+            panic!("invalid register number to free: {}", index);
+        }
+        if !self.items[index as usize] {
+            panic!("double free register, number: {}", index);
+        }
+        self.items[index as usize] = false;
     }
 }
 
@@ -95,18 +111,36 @@ impl From<&syn::BinOp> for OpCategory {
     }
 }
 
+#[derive(Clone)]
+struct RegInfo {
+    number: u8,
+    bit_length: u16,
+    var_ident: Option<syn::Ident>,
+    is_freed: bool,
+}
+
+impl RegInfo {
+    fn new(number: u8, bit_length: u16, var_ident: Option<syn::Ident>) -> RegInfo {
+        RegInfo {
+            number,
+            bit_length,
+            var_ident,
+            is_freed: false,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct CodegenContext {
     // vector registers
     v_registers: Registers,
     // general registers
-    _x_registers: Registers,
 
     // FIXME: handle varable scope
     // var_name => register_number
     var_regs: HashMap<syn::Ident, u8>,
     // expr_id => (register_number, bit_length)
-    expr_regs: HashMap<usize, (u8, u16)>,
+    expr_regs: HashMap<usize, RegInfo>,
 
     // expr_id => (var_name, bit_length)
     #[cfg(feature = "simulator")]
@@ -114,7 +148,8 @@ pub struct CodegenContext {
 
     // FIXME: fill in current module
     // ident => (mutability, Type)
-    _variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
+    #[allow(dead_code)]
+    variables: HashMap<syn::Ident, VarInfo>,
 
     // [When update v_config]
     //   1. When first vector instruction used update v_config and insert asm!()
@@ -135,18 +170,14 @@ pub struct CodegenContext {
 }
 
 impl CodegenContext {
-    pub fn new(
-        variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
-        show_asm: bool,
-    ) -> CodegenContext {
+    pub fn new(variables: HashMap<syn::Ident, VarInfo>, show_asm: bool) -> CodegenContext {
         CodegenContext {
-            v_registers: Registers::new("vector", 32),
-            _x_registers: Registers::new("general", 32),
+            v_registers: Registers::new("vector", vec![0]),
             var_regs: HashMap::default(),
             expr_regs: HashMap::default(),
             #[cfg(feature = "simulator")]
             expr_tokens: HashMap::default(),
-            _variables: variables,
+            variables,
             #[cfg(not(feature = "simulator"))]
             v_config: None,
             show_asm,
@@ -606,6 +637,13 @@ impl ToTokenStream for Block {
                 if let Some(fn_args) = context.fn_args.take() {
                     let mut args = fn_args
                         .into_iter()
+                        .filter(|fn_arg| {
+                            context
+                                .variables
+                                .get(&fn_arg.name)
+                                .map(|info| !info.is_unused())
+                                .expect("function input variable")
+                        })
                         .filter_map(|fn_arg| {
                             let bit_length: u16 = match fn_arg.ty.0.type_name().as_deref() {
                                 Some("U256") => 256,
@@ -625,7 +663,7 @@ impl ToTokenStream for Block {
                     for (fn_arg, bit_length) in args {
                         context.update_vconfig(inner, bit_length);
                         // Load{256,512,1024}
-                        let vreg = match context.v_registers.next_register() {
+                        let vreg = match context.v_registers.alloc() {
                             Some(vreg) => vreg,
                             None => {
                                 *err = Some((
@@ -752,11 +790,25 @@ mod test {
         out.check_types(&mut checker_context)?;
 
         println!("[variables]:");
-        for (ident, (mutability, ty)) in &checker_context.variables {
-            if mutability.is_some() {
-                println!("  [mut {:6}] => {:?}", ident, ty.0);
+        for (ident, info) in &checker_context.variables {
+            if info.mut_token.is_some() {
+                println!(
+                    "  [mut {:6}] => {:?} (lifetime = expr[{}] to expr[{}], unused: {})",
+                    ident,
+                    info.ty.0,
+                    info.start_expr_id,
+                    info.end_expr_id,
+                    info.is_unused(),
+                );
             } else {
-                println!("  [{:10}] => {:?}", ident, ty.0);
+                println!(
+                    "  [{:10}] => {:?} (lifetime = expr[{}] to expr[{}], unused: {})",
+                    ident,
+                    info.ty.0,
+                    info.start_expr_id,
+                    info.end_expr_id,
+                    info.is_unused(),
+                );
             }
         }
         println!("[literal exprs]:");
@@ -779,7 +831,7 @@ mod test {
     #[test]
     fn test_simple() {
         let input = quote! {
-            fn simple(x: u32, mut y: u64, z: &mut u64) -> u128 {
+            fn simple(x: u32, mut y: u64, z: &mut u64, w: u16) -> u128 {
                 let qqq: bool = false;
                 let jjj: () = {
                     y += 3;
@@ -997,7 +1049,7 @@ mod test {
             }
         };
         println!("[input ]: {}", input);
-        let output = rvv_test(input, false).unwrap();
+        let output = rvv_test(input, true).unwrap();
         println!("[otuput]: {}", output);
 
         #[cfg(feature = "simulator")]
@@ -1015,27 +1067,34 @@ mod test {
             #[inline(always)]
             #[no_mangle]
             fn comp_u1024(x: U1024, y: U1024) -> U1024 {
+                let _ = "li t0, 1";
+                let _ = "260239447 - vsetvl zero, t0, e1024, m1, ta, ma";
                 unsafe {
-                    asm!("li t0, 1", ".byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 15u8 ,)
+                    asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
                 }
+                let _ = "268628103 - vle1024.v v1, (t0)";
                 unsafe {
-                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) x.as_ref().as_ptr(), const 7u8, const 240u8, const 2u8, const 16u8 ,)
+                    asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 135u8 , const 240u8 , const 2u8 , const 16u8 ,)
                 }
+                let _ = "268628231 - vle1024.v v2, (t0)";
                 unsafe {
-                    asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) y.as_ref().as_ptr(), const 135u8, const 240u8, const 2u8, const 16u8 ,)
+                    asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) y . as_ref () . as_ptr () , const 7u8 , const 241u8 , const 2u8 , const 16u8 ,)
                 }
                 let z = {
+                    let _ = "vadd.vv v3, v1, v2 - 1114583";
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 87u8, const 129u8, const 0u8, const 0u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 1u8 , const 17u8 , const 0u8 ,)
                     }
+                    let _ = "vmul.vv v4, v3, v1 - 2486215255";
                     unsafe {
-                        asm!(".byte {0}, {1}, {2}, {3}", const 215u8, const 33u8, const 32u8, const 148u8 ,)
+                        asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 162u8 , const 48u8 , const 148u8 ,)
                     }
+                    let _ = "vse1024.v v4, (t0) - 268628519";
                     let mut tmp_rvv_vector_buf = [0u8; 128usize];
                     unsafe {
-                        asm!("mv t0, {0}", ".byte {1}, {2}, {3}, {4}", in (reg) tmp_rvv_vector_buf.as_mut_ptr(), const 167u8, const 241u8, const 2u8, const 16u8 ,)
+                        asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 39u8 , const 242u8 , const 2u8 , const 16u8 ,)
                     }
-                    unsafe { core::mem::transmute::<[u8 ; 128usize], U1024>(tmp_rvv_vector_buf) }
+                    unsafe { core::mem::transmute::<[u8; 128usize], U1024>(tmp_rvv_vector_buf) }
                 };
                 z
             }

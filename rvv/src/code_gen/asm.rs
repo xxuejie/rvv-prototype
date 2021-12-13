@@ -3,6 +3,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::token;
 
+use super::RegInfo;
 use super::{CodegenContext, OpCategory, ToTokenStream};
 use crate::ast::{Expression, TypedExpression};
 use crate::SpannedError;
@@ -37,10 +38,11 @@ impl CodegenContext {
             Expression::Path(path) => {
                 let mut tokens = TokenStream::new();
                 if top_level {
+                    // Here assume this expression is the return value of current block
                     if let Some(var_ident) = path.get_ident() {
                         if let Some(vreg) = self.var_regs.get(var_ident).cloned() {
-                            for (reg_num, bit_length) in self.expr_regs.values() {
-                                if *reg_num == vreg {
+                            for RegInfo{number, bit_length, ..} in self.expr_regs.values() {
+                                if *number == vreg {
                                     vstore_codegen(&mut tokens, vreg, *bit_length, self.show_asm);
                                     let mut rv = TokenStream::new();
                                     token::Brace::default().surround(&mut rv, |inner| {
@@ -98,10 +100,13 @@ impl CodegenContext {
         for typed_expr in [left, right] {
             if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(typed_expr.id, (*vreg, bit_length));
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(*vreg, bit_length, Some(var_ident.clone())),
+                    );
                 } else {
                     // Load{256,512,1024}
-                    let vreg = self.v_registers.next_register().ok_or_else(|| {
+                    let vreg = self.v_registers.alloc().ok_or_else(|| {
                         (
                             typed_expr.expr.1,
                             anyhow!("not enough V register for this expression"),
@@ -133,7 +138,10 @@ impl CodegenContext {
                     };
                     tokens.extend(Some(ts));
                     self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(typed_expr.id, (vreg, bit_length));
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(vreg, bit_length, Some(var_ident.clone())),
+                    );
                 }
             } else {
                 let ts = self.gen_tokens(typed_expr, false, None, None, bit_length)?;
@@ -142,21 +150,30 @@ impl CodegenContext {
         }
 
         let op_category = OpCategory::from(op);
-        let (vs2, bit_len2) = *self.expr_regs.get(&left.id).unwrap();
-        let (vs1, bit_len1) = *self.expr_regs.get(&right.id).unwrap();
+        let RegInfo {
+            number: vs2,
+            bit_length: bit_len2,
+            ..
+        } = self.expr_regs.get(&left.id).cloned().unwrap();
+        let RegInfo {
+            number: vs1,
+            bit_length: bit_len1,
+            ..
+        } = self.expr_regs.get(&right.id).cloned().unwrap();
         assert_eq!(bit_len1, bit_len2);
         let vd = if let Some(vd) = exists_vd {
             vd
         } else {
             match op_category {
                 OpCategory::Binary | OpCategory::Bool => {
-                    let vd = self.v_registers.next_register().ok_or_else(|| {
+                    let vd = self.v_registers.alloc().ok_or_else(|| {
                         (
                             expr.expr.1,
                             anyhow!("not enough V register for this expression"),
                         )
                     })?;
-                    self.expr_regs.insert(expr.id, (vd, bit_len1));
+                    self.expr_regs
+                        .insert(expr.id, RegInfo::new(vd, bit_len1, None));
                     vd
                 }
                 OpCategory::AssignOp => vs2,
@@ -236,14 +253,20 @@ impl CodegenContext {
 
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some((vd, bit_len)) = self.expr_regs.get(&expr.id).cloned() {
-                self.expr_regs.insert(extra_expr_id, (vd, bit_len));
+            if let Some(info) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, info);
             }
         }
+        self.free_sub_exprs(expr.id, left.id, right.id);
 
         match op_category {
             OpCategory::Binary if top_level && exists_vd.is_none() => {
-                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
+                let vreg = {
+                    let reg_info = self.expr_regs.get_mut(&expr.id).unwrap();
+                    self.v_registers.free(reg_info.number);
+                    reg_info.is_freed = true;
+                    reg_info.number
+                };
                 vstore_codegen(&mut tokens, vreg, bit_length, self.show_asm);
                 let mut rv = TokenStream::new();
                 token::Brace::default().surround(&mut rv, |inner| {
@@ -253,7 +276,7 @@ impl CodegenContext {
             }
             OpCategory::Binary | OpCategory::AssignOp => Ok(tokens),
             OpCategory::Bool => {
-                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
+                let RegInfo { number: vreg, .. } = *self.expr_regs.get(&expr.id).unwrap();
                 let inst = VInst::VfirstM {
                     rd: XReg::T0,
                     vs2: VReg::from_u8(vreg),
@@ -308,7 +331,7 @@ impl CodegenContext {
             _ => self
                 .expr_regs
                 .get(&expr.id)
-                .map(|(_, bit_len)| *bit_len)
+                .map(|info| info.bit_length)
                 .unwrap_or(0),
         };
         if top_level {
@@ -346,10 +369,13 @@ impl CodegenContext {
         for typed_expr in [left, right] {
             if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(typed_expr.id, (*vreg, bit_length));
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(*vreg, bit_length, Some(var_ident.clone())),
+                    );
                 } else {
                     // Load{256,512,1024}
-                    let vreg = self.v_registers.next_register().ok_or_else(|| {
+                    let vreg = self.v_registers.alloc().ok_or_else(|| {
                         (
                             typed_expr.expr.1,
                             anyhow!("not enough V register for this expression"),
@@ -381,7 +407,10 @@ impl CodegenContext {
                     };
                     tokens.extend(Some(ts));
                     self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(typed_expr.id, (vreg, bit_length));
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(vreg, bit_length, Some(var_ident.clone())),
+                    );
                 }
             } else {
                 let ts = self.gen_tokens(typed_expr, false, None, None, bit_length)?;
@@ -389,20 +418,29 @@ impl CodegenContext {
             }
         }
 
-        let (vs2, bit_len2) = *self.expr_regs.get(&left.id).unwrap();
-        let (vs1, bit_len1) = *self.expr_regs.get(&right.id).unwrap();
+        let RegInfo {
+            number: vs2,
+            bit_length: bit_len2,
+            ..
+        } = *self.expr_regs.get(&left.id).unwrap();
+        let RegInfo {
+            number: vs1,
+            bit_length: bit_len1,
+            ..
+        } = *self.expr_regs.get(&right.id).unwrap();
         assert_eq!(bit_len1, bit_len2);
-        let vd = self.v_registers.next_register().ok_or_else(|| {
+        let vd = self.v_registers.alloc().ok_or_else(|| {
             (
                 expr.expr.1,
                 anyhow!("not enough V register for this expression"),
             )
         })?;
-        self.expr_regs.insert(expr.id, (vd, bit_len1));
+        self.expr_regs
+            .insert(expr.id, RegInfo::new(vd, bit_len1, None));
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some((vd, bit_len)) = self.expr_regs.get(&expr.id).cloned() {
-                self.expr_regs.insert(extra_expr_id, (vd, bit_len));
+            if let Some(info) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, info);
             }
         }
 
@@ -574,6 +612,8 @@ impl CodegenContext {
             _ => {}
         };
 
+        self.free_sub_exprs(expr.id, left.id, right.id);
+
         let is_simple_asm = matches!(
             method_string.as_str(),
             "wrapping_add"
@@ -587,7 +627,12 @@ impl CodegenContext {
 
         if top_level {
             if is_simple_asm {
-                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
+                let vreg = {
+                    let reg_info = self.expr_regs.get_mut(&expr.id).unwrap();
+                    self.v_registers.free(reg_info.number);
+                    reg_info.is_freed = true;
+                    reg_info.number
+                };
                 let inst = VInst::VseV {
                     width: bit_length,
                     vs3: VReg::from_u8(vreg),
@@ -661,6 +706,31 @@ impl CodegenContext {
         }
     }
 
+    fn free_sub_exprs(
+        &mut self,
+        current_expr_id: usize,
+        left_expr_id: usize,
+        right_expr_id: usize,
+    ) {
+        for sub_expr_id in [&left_expr_id, &right_expr_id] {
+            let sub_reg_info = self.expr_regs.get_mut(sub_expr_id).unwrap();
+            let should_free = if let Some(var_ident) = sub_reg_info.var_ident.as_ref() {
+                let var_info = self.variables.get(var_ident).unwrap();
+                var_info.end_expr_id == current_expr_id
+            } else {
+                true
+            };
+            if should_free {
+                if !sub_reg_info.is_freed {
+                    self.v_registers.free(sub_reg_info.number);
+                    sub_reg_info.is_freed = true;
+                } else {
+                    panic!("double free expression: {}", sub_expr_id);
+                }
+            }
+        }
+    }
+
     fn simple_checked_codegen(
         &mut self,
         tokens: &mut TokenStream,
@@ -670,7 +740,7 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let eq_vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
         let mut inner_tokens = TokenStream::new();
         for pre_inst in [
@@ -756,7 +826,7 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let lt_vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
         let mut inner_tokens = TokenStream::new();
         for inst in [
@@ -843,7 +913,7 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let lt_vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
         let mut inner_tokens = TokenStream::new();
         for inst in [
@@ -883,7 +953,7 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
         let mut inner_tokens = TokenStream::new();
 
@@ -1045,7 +1115,7 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
 
         let mut inner_tokens = TokenStream::new();

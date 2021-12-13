@@ -8,20 +8,51 @@ use crate::ast::{
 };
 use crate::SpannedError;
 
+#[derive(Debug)]
+pub struct VarInfo {
+    pub span: Span,
+    pub mut_token: Option<Span>,
+    pub ty: Box<WithSpan<Type>>,
+    // indicate the varable liftime
+    pub start_expr_id: usize,
+    pub end_expr_id: usize,
+}
+
+impl VarInfo {
+    pub fn new(
+        span: Span,
+        mut_token: Option<Span>,
+        ty: Box<WithSpan<Type>>,
+        start_expr_id: usize,
+    ) -> VarInfo {
+        VarInfo {
+            span,
+            mut_token,
+            ty,
+            start_expr_id,
+            end_expr_id: start_expr_id,
+        }
+    }
+    #[cfg(not(feature = "simulator"))]
+    pub fn is_unused(&self) -> bool {
+        self.start_expr_id == self.end_expr_id
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct CheckerContext {
     expr_id: usize,
     pub literal_exprs: HashMap<usize, syn::Lit>,
     pub uninfered_exprs: HashMap<usize, TypedExpression>,
     // ident => (mutability, Type)
-    pub variables: HashMap<syn::Ident, (Option<Span>, Box<WithSpan<Type>>)>,
+    pub variables: HashMap<syn::Ident, VarInfo>,
 }
 
 impl CheckerContext {
-    fn get_expr_id(&mut self) -> usize {
-        let current_id = self.expr_id;
+    // zero expr_id is for function parameters
+    fn next_expr_id(&mut self) -> usize {
         self.expr_id += 1;
-        current_id
+        self.expr_id
     }
 }
 
@@ -206,8 +237,8 @@ impl TypeChecker for TypedExpression {
                 self.id, self.expr
             );
         }
-        self.id = context.get_expr_id();
         self.expr.0.check_types(context)?;
+        self.id = context.next_expr_id();
         self.ty = match &mut self.expr.0 {
             Expression::Assign { left, right, .. } | Expression::AssignOp { left, right, .. } => {
                 match (&mut left.ty, &mut right.ty) {
@@ -382,7 +413,13 @@ impl TypeChecker for TypedExpression {
             }
             Expression::Cast { ty, .. } => Some(ty.clone()),
             Expression::Path(path) => match path.get_ident() {
-                Some(ident) => context.variables.get(ident).map(|(_, ty)| ty.clone()),
+                Some(ident) => {
+                    let current_expr_id = context.expr_id;
+                    context.variables.get_mut(ident).map(|info| {
+                        info.end_expr_id = current_expr_id;
+                        info.ty.clone()
+                    })
+                }
                 None => None,
             },
             Expression::Break(_) => Some(Box::new((Type::unit(), Span::default()))),
@@ -418,9 +455,10 @@ impl TypeChecker for Statement {
                             ));
                         }
                         if let Some(ty) = init.ty.clone() {
-                            context
-                                .variables
-                                .insert((*ident).clone(), (*mutability, ty));
+                            context.variables.insert(
+                                (*ident).clone(),
+                                VarInfo::new(pat.1, *mutability, ty, context.expr_id),
+                            );
                         }
                     }
                     Pattern::Type { pat, ty, .. } => {
@@ -430,7 +468,10 @@ impl TypeChecker for Statement {
                             }
                             if context
                                 .variables
-                                .insert(ident.clone(), (*mutability, ty.clone()))
+                                .insert(
+                                    ident.clone(),
+                                    VarInfo::new(pat.1, *mutability, ty.clone(), context.expr_id),
+                                )
                                 .is_some()
                             {
                                 return Err((
@@ -474,9 +515,15 @@ impl TypeChecker for Signature {
     fn check_types(&mut self, context: &mut CheckerContext) -> Result<(), SpannedError> {
         for input in self.inputs.iter_mut() {
             // let binding in signature
-            context
-                .variables
-                .insert(input.name.clone(), (input.mutability, input.ty.clone()));
+            context.variables.insert(
+                input.name.clone(),
+                VarInfo::new(
+                    input.span,
+                    input.mutability,
+                    input.ty.clone(),
+                    context.expr_id,
+                ),
+            );
             input.check_types(context)?;
         }
         self.output.0.check_types(context)?;
