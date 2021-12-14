@@ -1,6 +1,6 @@
 use quote::quote;
 
-use super::rvv_test;
+use super::rvv_codegen;
 
 #[test]
 fn test_simple() {
@@ -36,7 +36,7 @@ fn test_simple() {
     };
     let input_string = input.to_string();
     println!("[input ]: {}", input_string);
-    let output = rvv_test(input, false).unwrap();
+    let output = rvv_codegen(input, false).unwrap();
     let output_string = output.to_string();
     println!("[otuput]: {}", output_string);
     assert_eq!(input_string, output_string);
@@ -66,7 +66,7 @@ fn test_u256() {
         }
     };
     println!("[input ]: {}", input);
-    let output = rvv_test(input, true).unwrap();
+    let output = rvv_codegen(input, true).unwrap();
     println!("[otuput]: {}", output);
 
     #[cfg(feature = "simulator")]
@@ -99,23 +99,23 @@ fn test_u256() {
     let expected_output = quote! {
         fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
             let _ = "li t0, 1";
-            let _ = "243462231 - vsetvl zero, t0, e256, m1, ta, ma";
+            let _ = "vsetvl zero, t0, e256, m1, ta, ma - 243462231";
             unsafe {
                 asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 14u8 ,)
             }
-            let _ = "268619911 - vle256.v v1, (t0)";
+            let _ = "vle256.v v1, (t0) - 268619911";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 135u8 , const 208u8 , const 2u8 , const 16u8 ,)
             }
-            let _ = "268620039 - vle256.v v2, (t0)";
+            let _ = "vle256.v v2, (t0) - 268620039";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) y . as_ref () . as_ptr () , const 7u8 , const 209u8 , const 2u8 , const 16u8 ,)
             }
-            let _ = "268620167 - vle256.v v3, (t0)";
+            let _ = "vle256.v v3, (t0) - 268620167";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) z . as_ref () . as_ptr () , const 135u8 , const 209u8 , const 2u8 , const 16u8 ,)
             }
-            let _ = "268620295 - vle256.v v4, (t0)";
+            let _ = "vle256.v v4, (t0) - 268620295";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) w . as_ref () . as_ptr () , const 7u8 , const 210u8 , const 2u8 , const 16u8 ,)
             }
@@ -183,7 +183,7 @@ fn test_u256() {
                 asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 161u8 , const 64u8 , const 148u8 ,)
             };
             let abc = 3456;
-            let _ = "268620295 - vle256.v v4, (t0)";
+            let _ = "vle256.v v4, (t0) - 268620295";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) j . as_ref () . as_ptr () , const 7u8 , const 210u8 , const 2u8 , const 16u8 ,)
             }
@@ -224,7 +224,7 @@ fn test_u256() {
                 asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 1u8 , const 49u8 , const 160u8 ,)
             };
             let zero = U256::zero();
-            let _ = "268619911 - vle256.v v1, (t0)";
+            let _ = "vle256.v v1, (t0) - 268619911";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) zero . as_ref () . as_ptr () , const 135u8 , const 208u8 , const 2u8 , const 16u8 ,)
             }
@@ -256,7 +256,7 @@ fn test_u1024() {
         }
     };
     println!("[input ]: {}", input);
-    let output = rvv_test(input, true).unwrap();
+    let output = rvv_codegen(input, true).unwrap();
     println!("[otuput]: {}", output);
 
     #[cfg(feature = "simulator")]
@@ -275,15 +275,15 @@ fn test_u1024() {
         #[no_mangle]
         fn comp_u1024(x: U1024, y: U1024) -> U1024 {
             let _ = "li t0, 1";
-            let _ = "260239447 - vsetvl zero, t0, e1024, m1, ta, ma";
+            let _ = "vsetvl zero, t0, e1024, m1, ta, ma - 260239447";
             unsafe {
                 asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
             }
-            let _ = "268628103 - vle1024.v v1, (t0)";
+            let _ = "vle1024.v v1, (t0) - 268628103";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 135u8 , const 240u8 , const 2u8 , const 16u8 ,)
             }
-            let _ = "268628231 - vle1024.v v2, (t0)";
+            let _ = "vle1024.v v2, (t0) - 268628231";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) y . as_ref () . as_ptr () , const 7u8 , const 241u8 , const 2u8 , const 16u8 ,)
             }
@@ -324,7 +324,7 @@ fn test_method_call() {
         }
     };
     println!("[input ]: {}", input);
-    let output = rvv_test(input, true).unwrap();
+    let output = rvv_codegen(input, true).unwrap();
     println!("[otuput]: {}", output);
 
     #[cfg(feature = "simulator")]
@@ -342,23 +342,23 @@ fn test_method_call() {
     let expected_output = quote! {
         fn comp_u1024(a: U1024, b: U1024, c: U1024, d: U1024) -> U1024 {
             let _ = "li t0, 1";
-            let _ = "260239447 - vsetvl zero, t0, e1024, m1, ta, ma";
+            let _ = "vsetvl zero, t0, e1024, m1, ta, ma - 260239447";
             unsafe {
                 asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
             }
-            let _ = "268628103 - vle1024.v v1, (t0)";
+            let _ = "vle1024.v v1, (t0) - 268628103";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) a . as_ref () . as_ptr () , const 135u8 , const 240u8 , const 2u8 , const 16u8 ,)
             }
-            let _ = "268628231 - vle1024.v v2, (t0)";
+            let _ = "vle1024.v v2, (t0) - 268628231";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) b . as_ref () . as_ptr () , const 7u8 , const 241u8 , const 2u8 , const 16u8 ,)
             }
-            let _ = "268628359 - vle1024.v v3, (t0)";
+            let _ = "vle1024.v v3, (t0) - 268628359";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) c . as_ref () . as_ptr () , const 135u8 , const 241u8 , const 2u8 , const 16u8 ,)
             }
-            let _ = "268628487 - vle1024.v v4, (t0)";
+            let _ = "vle1024.v v4, (t0) - 268628487";
             unsafe {
                 asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) d . as_ref () . as_ptr () , const 7u8 , const 242u8 , const 2u8 , const 16u8 ,)
             }
@@ -382,7 +382,7 @@ fn test_method_call() {
                     }
                     let _ = "mv {tmp_bool_t0}, t0";
                     let _ = "mv t2, {tmp_rvv_vector_buf}";
-                    let _ = "268693671 - vse1024.v v1, (t2)";
+                    let _ = "vse1024.v v1, (t2) - 268693671";
                     let tmp_bool_t0: i64;
                     let mut tmp_rvv_vector_buf = [0u8; 128usize];
                     unsafe {
@@ -390,9 +390,9 @@ fn test_method_call() {
                     }
                     let tmp_uint_rv =
                         unsafe { core::mem::transmute::<[u8; 128usize], U1024>(tmp_rvv_vector_buf) };
-                    let _ = "2148704599 - vdivu.vv v2, v1, v5";
-                    let _ = "1679917399 - vmsne.vv v2, v2, v3";
-                    let _ = "1076405079 - vfirst.m t1, v2";
+                    let _ = "vdivu.vv v2, v1, v5 - 2148704599";
+                    let _ = "vmsne.vv v2, v2, v3 - 1679917399";
+                    let _ = "vfirst.m t1, v2 - 1076405079";
                     let _ = "mv {tmp_bool_t1}, t1";
                     if tmp_bool_t0 == 0 {
                         let tmp_bool_t1: i64;
@@ -407,7 +407,7 @@ fn test_method_call() {
             };
             let x = x_tuple.0;
             let z_opt = {
-                let _ = "268628359 - vle1024.v v3, (t0)";
+                let _ = "vle1024.v v3, (t0) - 268628359";
                 unsafe {
                     asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) x . as_ref () . as_ptr () , const 135u8 , const 241u8 , const 2u8 , const 16u8 ,)
                 }
@@ -421,9 +421,9 @@ fn test_method_call() {
                         asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 162u8 , const 104u8 , const 64u8 ,)
                     }
                     let _ = "mv {tmp_bool_var}, t0";
-                    let _ = "2150769367 - vdivu.vv v5, v3, v4";
+                    let _ = "vdivu.vv v5, v3, v4 - 2150769367";
                     let _ = "mv t1, {tmp_rvv_vector_buf}";
-                    let _ = "268661415 - vse1024.v v5, (t1)";
+                    let _ = "vse1024.v v5, (t1) - 268661415";
                     let tmp_bool_var: i64;
                     unsafe { asm ! ("mv {0}, t0" , out (reg) tmp_bool_var ,) }
                     if tmp_bool_var == 0 {

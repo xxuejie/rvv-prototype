@@ -121,7 +121,7 @@ impl CodegenContext {
                     };
                     let [b0, b1, b2, b3] = inst.encode_bytes();
                     if self.show_asm {
-                        let comment = format!("{} - {}", inst.encode_u32(), inst);
+                        let comment = format!("{} - {}", inst, inst.encode_u32());
                         tokens.extend(Some(quote! {
                             let _ = #comment;
                         }));
@@ -395,7 +395,7 @@ impl CodegenContext {
                     };
                     let [b0, b1, b2, b3] = inst.encode_bytes();
                     if self.show_asm {
-                        let comment = format!("{} - {}", inst.encode_u32(), inst);
+                        let comment = format!("{} - {}", inst, inst.encode_u32());
                         tokens.extend(Some(quote! {
                             let _ = #comment;
                         }));
@@ -679,7 +679,80 @@ impl CodegenContext {
         }
     }
 
-    pub(crate) fn update_vconfig(&mut self, tokens: &mut TokenStream, bit_length: u16) {
+    pub(crate) fn gen_inputs_tokens(
+        &mut self,
+        tokens: &mut TokenStream,
+    ) -> Result<(), SpannedError> {
+        if let Some(fn_args) = self.fn_args.take() {
+            let mut args = fn_args
+                .into_iter()
+                .filter(|fn_arg| {
+                    self.variables
+                        .get(&fn_arg.name)
+                        .map(|info| !info.is_unused())
+                        .expect("function input variable")
+                })
+                .filter_map(|fn_arg| {
+                    let bit_length: u16 = match fn_arg.ty.0.type_name().as_deref() {
+                        Some("U256") => 256,
+                        Some("U512") => 512,
+                        Some("U1024") => 1024,
+                        _ => 0,
+                    };
+                    if bit_length > 0 {
+                        Some((fn_arg, bit_length))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            args.sort_by_key(|(_, bit_length)| *bit_length);
+
+            for (fn_arg, bit_length) in args {
+                self.update_vconfig(tokens, bit_length);
+                // Load{256,512,1024}
+                let vreg = match self.v_registers.alloc() {
+                    Some(vreg) => vreg,
+                    None => {
+                        return Err((
+                            fn_arg.span,
+                            anyhow!("not enough V register for function argument"),
+                        ));
+                    }
+                };
+                // FIXME: t0 register may already used by Rust code
+                let inst = VInst::VleV {
+                    width: bit_length,
+                    vd: VReg::from_u8(vreg),
+                    rs1: XReg::T0,
+                    vm: false,
+                };
+                let [b0, b1, b2, b3] = inst.encode_bytes();
+                if self.show_asm {
+                    let comment = format!("{} - {}", inst, inst.encode_u32());
+                    tokens.extend(Some(quote! {
+                        let _ = #comment;
+                    }));
+                }
+                let var_ident = fn_arg.name;
+                let ts = quote! {
+                    unsafe {
+                        asm!(
+                            "mv t0, {0}",
+                            ".byte {1}, {2}, {3}, {4}",
+                            in(reg) #var_ident.as_ref().as_ptr(),
+                            const #b0, const #b1, const #b2, const #b3,
+                        )
+                    }
+                };
+                tokens.extend(Some(ts));
+                self.var_regs.insert(var_ident.clone(), vreg);
+            }
+        }
+        Ok(())
+    }
+
+    fn update_vconfig(&mut self, tokens: &mut TokenStream, bit_length: u16) {
         // vsetvli x0, t0, e{256,512,1024}, m1, ta, ma
         let v_config = VConfig::Vsetvli {
             rd: XReg::Zero,
@@ -692,7 +765,7 @@ impl CodegenContext {
             let [b0, b1, b2, b3] = inst.encode_bytes();
             if self.show_asm {
                 let comment0 = "li t0, 1";
-                let comment1 = format!("{} - {}", inst.encode_u32(), inst);
+                let comment1 = format!("{} - {}", inst, inst.encode_u32());
                 tokens.extend(Some(quote! {
                     let _ = #comment0;
                     let _ = #comment1;
@@ -777,9 +850,9 @@ impl CodegenContext {
 
         if self.show_asm {
             let comment0 = "mv {tmp_bool_var}, t0";
-            let comment1 = format!("{} - {}", inst.encode_u32(), inst);
+            let comment1 = format!("{} - {}", inst, inst.encode_u32());
             let comment2 = "mv t1, {tmp_rvv_vector_buf}";
-            let comment3 = format!("{} - {}", inst_store.encode_u32(), inst_store);
+            let comment3 = format!("{} - {}", inst_store, inst_store.encode_u32());
             inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
@@ -863,9 +936,9 @@ impl CodegenContext {
 
         if self.show_asm {
             let comment0 = "mv {tmp_bool_var}, t0";
-            let comment1 = format!("{} - {}", inst.encode_u32(), inst);
+            let comment1 = format!("{} - {}", inst, inst.encode_u32());
             let comment2 = "mv t1, {tmp_rvv_vector_buf}";
-            let comment3 = format!("{} - {}", inst_store.encode_u32(), inst_store);
+            let comment3 = format!("{} - {}", inst_store, inst_store.encode_u32());
             inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
@@ -1017,7 +1090,7 @@ impl CodegenContext {
         if self.show_asm {
             let comment0 = "mv {tmp_bool_t0}, t0";
             let comment1 = "mv t2, {tmp_rvv_vector_buf}";
-            let comment2 = format!("{} - {}", inst_store.encode_u32(), inst_store);
+            let comment2 = format!("{} - {}", inst_store, inst_store.encode_u32());
             inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
@@ -1041,9 +1114,9 @@ impl CodegenContext {
             let tmp_uint_rv = unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) };
         }));
         if self.show_asm {
-            let comment0 = format!("{} - {}", inst_div.encode_u32(), inst_div);
-            let comment1 = format!("{} - {}", inst_ne.encode_u32(), inst_ne);
-            let comment2 = format!("{} - {}", inst_firstm.encode_u32(), inst_firstm);
+            let comment0 = format!("{} - {}", inst_div, inst_div.encode_u32());
+            let comment1 = format!("{} - {}", inst_ne, inst_ne.encode_u32());
+            let comment2 = format!("{} - {}", inst_firstm, inst_firstm.encode_u32());
             let comment3 = "mv {tmp_bool_t1}, t1";
             inner_tokens.extend(Some(quote! {
                 let _ = #comment0;

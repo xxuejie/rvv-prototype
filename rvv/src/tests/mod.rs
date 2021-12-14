@@ -1,4 +1,5 @@
-mod code_gen;
+mod code_gen_mixed;
+mod code_gen_partial;
 
 use std::convert::TryFrom;
 
@@ -10,7 +11,7 @@ use crate::code_gen::{CodegenContext, ToTokenStream};
 use crate::type_checker::{CheckerContext, TypeChecker};
 use crate::SpannedError;
 
-fn rvv_test(item: TokenStream, show_asm: bool) -> Result<TokenStream, SpannedError> {
+fn rvv_codegen(item: TokenStream, show_asm: bool) -> Result<TokenStream, SpannedError> {
     let input: syn::ItemFn = syn::parse2(item).unwrap();
     let mut out = ItemFn::try_from(&input)?;
     let mut checker_context = CheckerContext::default();
@@ -53,4 +54,9 @@ fn rvv_test(item: TokenStream, show_asm: bool) -> Result<TokenStream, SpannedErr
     out.to_tokens(&mut tokens, &mut codegen_context)?;
     // println!("out: {:#?}", out);
     Ok(TokenStream::from(quote!(#tokens)))
+}
+
+fn run_rvv_test(input: TokenStream, expected_output: TokenStream) {
+    let output = rvv_codegen(input, true).unwrap();
+    assert_eq!(output.to_string(), expected_output.to_string());
 }

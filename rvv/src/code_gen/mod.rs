@@ -1,10 +1,5 @@
 use std::collections::HashMap;
 
-#[cfg(not(feature = "simulator"))]
-use anyhow::anyhow;
-#[cfg(not(feature = "simulator"))]
-use quote::quote;
-
 use proc_macro2::TokenStream;
 use quote::ToTokens;
 use syn::token;
@@ -16,7 +11,7 @@ use crate::ast::{
 use crate::type_checker::VarInfo;
 use crate::SpannedError;
 #[cfg(not(feature = "simulator"))]
-use rvv_assembler::{VConfig, VInst, VReg, XReg};
+use rvv_assembler::VConfig;
 
 #[cfg(not(feature = "simulator"))]
 mod asm;
@@ -634,73 +629,9 @@ impl ToTokenStream for Block {
         catch_inner_error(|err| {
             token::Brace::default().surround(tokens, |inner| {
                 #[cfg(not(feature = "simulator"))]
-                if let Some(fn_args) = context.fn_args.take() {
-                    let mut args = fn_args
-                        .into_iter()
-                        .filter(|fn_arg| {
-                            context
-                                .variables
-                                .get(&fn_arg.name)
-                                .map(|info| !info.is_unused())
-                                .expect("function input variable")
-                        })
-                        .filter_map(|fn_arg| {
-                            let bit_length: u16 = match fn_arg.ty.0.type_name().as_deref() {
-                                Some("U256") => 256,
-                                Some("U512") => 512,
-                                Some("U1024") => 1024,
-                                _ => 0,
-                            };
-                            if bit_length > 0 {
-                                Some((fn_arg, bit_length))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    args.sort_by_key(|(_, bit_length)| *bit_length);
-
-                    for (fn_arg, bit_length) in args {
-                        context.update_vconfig(inner, bit_length);
-                        // Load{256,512,1024}
-                        let vreg = match context.v_registers.alloc() {
-                            Some(vreg) => vreg,
-                            None => {
-                                *err = Some((
-                                    fn_arg.span,
-                                    anyhow!("not enough V register for function argument"),
-                                ));
-                                return;
-                            }
-                        };
-                        // FIXME: t0 register may already used by Rust code
-                        let inst = VInst::VleV {
-                            width: bit_length,
-                            vd: VReg::from_u8(vreg),
-                            rs1: XReg::T0,
-                            vm: false,
-                        };
-                        let [b0, b1, b2, b3] = inst.encode_bytes();
-                        if context.show_asm {
-                            let comment = format!("{} - {}", inst.encode_u32(), inst);
-                            inner.extend(Some(quote! {
-                                let _ = #comment;
-                            }));
-                        }
-                        let var_ident = fn_arg.name;
-                        let ts = quote! {
-                            unsafe {
-                                asm!(
-                                    "mv t0, {0}",
-                                    ".byte {1}, {2}, {3}, {4}",
-                                    in(reg) #var_ident.as_ref().as_ptr(),
-                                    const #b0, const #b1, const #b2, const #b3,
-                                )
-                            }
-                        };
-                        inner.extend(Some(ts));
-                        context.var_regs.insert(var_ident.clone(), vreg);
-                    }
+                if let Err(inner_err) = context.gen_inputs_tokens(inner) {
+                    *err = Some(inner_err);
+                    return;
                 }
                 for stmt in &self.stmts {
                     if let Err(inner_err) = stmt.0.to_tokens(inner, context) {
