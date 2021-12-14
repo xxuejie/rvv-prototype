@@ -98,7 +98,6 @@ fn test_u256() {
     #[cfg(not(feature = "simulator"))]
     let expected_output = quote! {
         fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
-            let _ = "li t0, 1";
             let _ = "vsetvl zero, t0, e256, m1, ta, ma - 243462231";
             unsafe {
                 asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 14u8 ,)
@@ -146,7 +145,6 @@ fn test_u256() {
                     asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 130u8 , const 32u8 , const 104u8 ,)
                 }
                 let _ = "vfirst.m t0, v4 - 1078502103";
-                let _ = "mv {tmp_bool_t0}, t0";
                 let tmp_bool_t0: i64;
                 unsafe {
                     asm ! (".byte {0}, {1}, {2}, {3}" , "mv {4}, t0" , const 215u8 , const 162u8 , const 72u8 , const 64u8 , out (reg) tmp_bool_t0 ,)
@@ -158,7 +156,6 @@ fn test_u256() {
                     asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 130u8 , const 33u8 , const 96u8 ,)
                 }
                 let _ = "vfirst.m t0, v4 - 1078502103";
-                let _ = "mv {tmp_bool_t0}, t0";
                 let tmp_bool_t0: i64;
                 unsafe {
                     asm ! (".byte {0}, {1}, {2}, {3}" , "mv {4}, t0" , const 215u8 , const 162u8 , const 72u8 , const 64u8 , out (reg) tmp_bool_t0 ,)
@@ -274,7 +271,6 @@ fn test_u1024() {
         #[inline(always)]
         #[no_mangle]
         fn comp_u1024(x: U1024, y: U1024) -> U1024 {
-            let _ = "li t0, 1";
             let _ = "vsetvl zero, t0, e1024, m1, ta, ma - 260239447";
             unsafe {
                 asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
@@ -341,7 +337,6 @@ fn test_method_call() {
     #[cfg(not(feature = "simulator"))]
     let expected_output = quote! {
         fn comp_u1024(a: U1024, b: U1024, c: U1024, d: U1024) -> U1024 {
-            let _ = "li t0, 1";
             let _ = "vsetvl zero, t0, e1024, m1, ta, ma - 260239447";
             unsafe {
                 asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 15u8 ,)
@@ -380,8 +375,6 @@ fn test_method_call() {
                     unsafe {
                         asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 162u8 , const 40u8 , const 64u8 ,)
                     }
-                    let _ = "mv {tmp_bool_t0}, t0";
-                    let _ = "mv t2, {tmp_rvv_vector_buf}";
                     let _ = "vse1024.v v1, (t2) - 268693671";
                     let tmp_bool_t0: i64;
                     let mut tmp_rvv_vector_buf = [0u8; 128usize];
@@ -393,7 +386,6 @@ fn test_method_call() {
                     let _ = "vdivu.vv v2, v1, v5 - 2148704599";
                     let _ = "vmsne.vv v2, v2, v3 - 1679917399";
                     let _ = "vfirst.m t1, v2 - 1076405079";
-                    let _ = "mv {tmp_bool_t1}, t1";
                     if tmp_bool_t0 == 0 {
                         let tmp_bool_t1: i64;
                         unsafe {
@@ -420,9 +412,7 @@ fn test_method_call() {
                     unsafe {
                         asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 162u8 , const 104u8 , const 64u8 ,)
                     }
-                    let _ = "mv {tmp_bool_var}, t0";
                     let _ = "vdivu.vv v5, v3, v4 - 2150769367";
-                    let _ = "mv t1, {tmp_rvv_vector_buf}";
                     let _ = "vse1024.v v5, (t1) - 268661415";
                     let tmp_bool_var: i64;
                     unsafe { asm ! ("mv {0}, t0" , out (reg) tmp_bool_var ,) }

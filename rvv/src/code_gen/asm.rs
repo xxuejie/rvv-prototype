@@ -95,59 +95,9 @@ impl CodegenContext {
                 }
             };
         }
-        self.update_vconfig(&mut tokens, bit_length);
 
-        for typed_expr in [left, right] {
-            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
-                if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(
-                        typed_expr.id,
-                        RegInfo::new(*vreg, bit_length, Some(var_ident.clone())),
-                    );
-                } else {
-                    // Load{256,512,1024}
-                    let vreg = self.v_registers.alloc().ok_or_else(|| {
-                        (
-                            typed_expr.expr.1,
-                            anyhow!("not enough V register for this expression"),
-                        )
-                    })?;
-                    // FIXME: t0 register may already used by Rust code
-                    let inst = VInst::VleV {
-                        width: bit_length,
-                        vd: VReg::from_u8(vreg),
-                        rs1: XReg::T0,
-                        vm: false,
-                    };
-                    let [b0, b1, b2, b3] = inst.encode_bytes();
-                    if self.show_asm {
-                        let comment = format!("{} - {}", inst, inst.encode_u32());
-                        tokens.extend(Some(quote! {
-                            let _ = #comment;
-                        }));
-                    }
-                    let ts = quote! {
-                        unsafe {
-                            asm!(
-                                "mv t0, {0}",
-                                ".byte {1}, {2}, {3}, {4}",
-                                in(reg) #var_ident.as_ref().as_ptr(),
-                                const #b0, const #b1, const #b2, const #b3,
-                            )
-                        }
-                    };
-                    tokens.extend(Some(ts));
-                    self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(
-                        typed_expr.id,
-                        RegInfo::new(vreg, bit_length, Some(var_ident.clone())),
-                    );
-                }
-            } else {
-                let ts = self.gen_tokens(typed_expr, false, None, None, bit_length)?;
-                tokens.extend(Some(ts));
-            }
-        }
+        self.update_vconfig(&mut tokens, bit_length);
+        self.gen_sub_exprs(&mut tokens, left, right, bit_length)?;
 
         let op_category = OpCategory::from(op);
         let RegInfo {
@@ -292,7 +242,7 @@ impl CodegenContext {
                     let comment = format!("{} - {}", inst, inst.encode_u32());
                     tokens.extend(Some(quote! {
                         let _ = #comment;
-                        let _ = "mv {tmp_bool_t0}, t0";
+                        // let _ = "mv {tmp_bool_t0}, t0";
                     }));
                 }
                 tokens.extend(Some(quote! {
@@ -371,57 +321,7 @@ impl CodegenContext {
 
         let left = &receiver;
         let right = &args[0];
-        for typed_expr in [left, right] {
-            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
-                if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(
-                        typed_expr.id,
-                        RegInfo::new(*vreg, bit_length, Some(var_ident.clone())),
-                    );
-                } else {
-                    // Load{256,512,1024}
-                    let vreg = self.v_registers.alloc().ok_or_else(|| {
-                        (
-                            typed_expr.expr.1,
-                            anyhow!("not enough V register for this expression"),
-                        )
-                    })?;
-                    // FIXME: t0 register may already used by Rust code
-                    let inst = VInst::VleV {
-                        width: bit_length,
-                        vd: VReg::from_u8(vreg),
-                        rs1: XReg::T0,
-                        vm: false,
-                    };
-                    let [b0, b1, b2, b3] = inst.encode_bytes();
-                    if self.show_asm {
-                        let comment = format!("{} - {}", inst, inst.encode_u32());
-                        tokens.extend(Some(quote! {
-                            let _ = #comment;
-                        }));
-                    }
-                    let ts = quote! {
-                        unsafe {
-                            asm!(
-                                "mv t0, {0}",
-                                ".byte {1}, {2}, {3}, {4}",
-                                in(reg) #var_ident.as_ref().as_ptr(),
-                                const #b0, const #b1, const #b2, const #b3,
-                            )
-                        }
-                    };
-                    tokens.extend(Some(ts));
-                    self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(
-                        typed_expr.id,
-                        RegInfo::new(vreg, bit_length, Some(var_ident.clone())),
-                    );
-                }
-            } else {
-                let ts = self.gen_tokens(typed_expr, false, None, None, bit_length)?;
-                tokens.extend(Some(ts));
-            }
-        }
+        self.gen_sub_exprs(&mut tokens, left, right, bit_length)?;
 
         let RegInfo {
             number: vs2,
@@ -646,10 +546,10 @@ impl CodegenContext {
                 };
                 let [b0, b1, b2, b3] = inst.encode_bytes();
                 if self.show_asm {
-                    let comment0 = "mv t0, {tmp_rvv_vector_buf}";
+                    // let comment0 = "mv t0, {tmp_rvv_vector_buf}";
                     let comment1 = format!("{} - {}", inst, inst.encode_u32());
                     tokens.extend(Some(quote! {
-                        let _ = #comment0;
+                        // let _ = #comment0;
                         let _ = #comment1;
                     }));
                 }
@@ -677,6 +577,67 @@ impl CodegenContext {
         } else {
             Ok(tokens)
         }
+    }
+
+    fn gen_sub_exprs(
+        &mut self,
+        tokens: &mut TokenStream,
+        left: &TypedExpression,
+        right: &TypedExpression,
+        bit_length: u16,
+    ) -> Result<(), SpannedError> {
+        for typed_expr in [left, right] {
+            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
+                if let Some(vreg) = self.var_regs.get(var_ident) {
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(*vreg, bit_length, Some(var_ident.clone())),
+                    );
+                } else {
+                    // Load{256,512,1024}
+                    let vreg = self.v_registers.alloc().ok_or_else(|| {
+                        (
+                            typed_expr.expr.1,
+                            anyhow!("not enough V register for this expression"),
+                        )
+                    })?;
+                    // FIXME: t0 register may already used by Rust code
+                    let inst = VInst::VleV {
+                        width: bit_length,
+                        vd: VReg::from_u8(vreg),
+                        rs1: XReg::T0,
+                        vm: false,
+                    };
+                    let [b0, b1, b2, b3] = inst.encode_bytes();
+                    if self.show_asm {
+                        let comment = format!("{} - {}", inst, inst.encode_u32());
+                        tokens.extend(Some(quote! {
+                            let _ = #comment;
+                        }));
+                    }
+                    let ts = quote! {
+                        unsafe {
+                            asm!(
+                                "mv t0, {0}",
+                                ".byte {1}, {2}, {3}, {4}",
+                                in(reg) #var_ident.as_ref().as_ptr(),
+                                const #b0, const #b1, const #b2, const #b3,
+                            )
+                        }
+                    };
+                    tokens.extend(Some(ts));
+                    self.var_regs.insert(var_ident.clone(), vreg);
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(vreg, bit_length, Some(var_ident.clone())),
+                    );
+                }
+            } else {
+                let ts = self.gen_tokens(typed_expr, false, None, None, bit_length)?;
+                tokens.extend(Some(ts));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn gen_inputs_tokens(
@@ -764,10 +725,10 @@ impl CodegenContext {
             let inst = VInst::VConfig(v_config);
             let [b0, b1, b2, b3] = inst.encode_bytes();
             if self.show_asm {
-                let comment0 = "li t0, 1";
+                // let comment0 = "li t0, 1";
                 let comment1 = format!("{} - {}", inst, inst.encode_u32());
                 tokens.extend(Some(quote! {
-                    let _ = #comment0;
+                    // let _ = #comment0;
                     let _ = #comment1;
                 }));
             }
@@ -849,14 +810,14 @@ impl CodegenContext {
         let buf_length = bit_length as usize / 8;
 
         if self.show_asm {
-            let comment0 = "mv {tmp_bool_var}, t0";
+            // let comment0 = "mv {tmp_bool_var}, t0";
             let comment1 = format!("{} - {}", inst, inst.encode_u32());
-            let comment2 = "mv t1, {tmp_rvv_vector_buf}";
+            // let comment2 = "mv t1, {tmp_rvv_vector_buf}";
             let comment3 = format!("{} - {}", inst_store, inst_store.encode_u32());
             inner_tokens.extend(Some(quote! {
-                let _ = #comment0;
+                // let _ = #comment0;
                 let _ = #comment1;
-                let _ = #comment2;
+                // let _ = #comment2;
                 let _ = #comment3;
             }));
         }
@@ -935,14 +896,14 @@ impl CodegenContext {
         let buf_length = bit_length as usize / 8;
 
         if self.show_asm {
-            let comment0 = "mv {tmp_bool_var}, t0";
+            // let comment0 = "mv {tmp_bool_var}, t0";
             let comment1 = format!("{} - {}", inst, inst.encode_u32());
-            let comment2 = "mv t1, {tmp_rvv_vector_buf}";
+            // let comment2 = "mv t1, {tmp_rvv_vector_buf}";
             let comment3 = format!("{} - {}", inst_store, inst_store.encode_u32());
             inner_tokens.extend(Some(quote! {
-                let _ = #comment0;
+                // let _ = #comment0;
                 let _ = #comment1;
-                let _ = #comment2;
+                // let _ = #comment2;
                 let _ = #comment3;
             }));
         }
@@ -1088,12 +1049,12 @@ impl CodegenContext {
         let uint_type = quote::format_ident!("U{}", bit_length);
         let buf_length = bit_length as usize / 8;
         if self.show_asm {
-            let comment0 = "mv {tmp_bool_t0}, t0";
-            let comment1 = "mv t2, {tmp_rvv_vector_buf}";
+            // let comment0 = "mv {tmp_bool_t0}, t0";
+            // let comment1 = "mv t2, {tmp_rvv_vector_buf}";
             let comment2 = format!("{} - {}", inst_store, inst_store.encode_u32());
             inner_tokens.extend(Some(quote! {
-                let _ = #comment0;
-                let _ = #comment1;
+                // let _ = #comment0;
+                // let _ = #comment1;
                 let _ = #comment2;
             }));
         }
@@ -1117,12 +1078,12 @@ impl CodegenContext {
             let comment0 = format!("{} - {}", inst_div, inst_div.encode_u32());
             let comment1 = format!("{} - {}", inst_ne, inst_ne.encode_u32());
             let comment2 = format!("{} - {}", inst_firstm, inst_firstm.encode_u32());
-            let comment3 = "mv {tmp_bool_t1}, t1";
+            // let comment3 = "mv {tmp_bool_t1}, t1";
             inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
                 let _ = #comment2;
-                let _ = #comment3;
+                // let _ = #comment3;
             }));
         }
         let ts = if is_checked {
@@ -1343,12 +1304,12 @@ fn overflowing_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16,
         vm: false,
     };
     if show_asm {
-        let comment0 = "mv {tmp_bool_var}, t0";
-        let comment1 = "mv t1, {tmp_rvv_vector_buf}";
+        // let comment0 = "mv {tmp_bool_var}, t0";
+        // let comment1 = "mv t1, {tmp_rvv_vector_buf}";
         let comment2 = format!("{} - {}", inst, inst.encode_u32());
         tokens.extend(Some(quote! {
-            let _ = #comment0;
-            let _ = #comment1;
+            // let _ = #comment0;
+            // let _ = #comment1;
             let _ = #comment2;
         }));
     }
@@ -1383,12 +1344,12 @@ fn checked_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16, sho
         vm: false,
     };
     if show_asm {
-        let comment0 = "mv {tmp_bool_var}, t0";
-        let comment1 = "mv t1, {tmp_rvv_vector_buf}";
+        // let comment0 = "mv {tmp_bool_var}, t0";
+        // let comment1 = "mv t1, {tmp_rvv_vector_buf}";
         let comment2 = format!("{} - {}", inst, inst.encode_u32());
         tokens.extend(Some(quote! {
-            let _ = #comment0;
-            let _ = #comment1;
+            // let _ = #comment0;
+            // let _ = #comment1;
             let _ = #comment2;
         }));
     }
