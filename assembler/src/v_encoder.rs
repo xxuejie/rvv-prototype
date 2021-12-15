@@ -1116,18 +1116,26 @@ impl fmt::Display for VInst {
             VInst::VmsleuVi(ivi) => {
                 write!(f, "vmsleu.vi {}", ivi)
             }
-            VInst::VmsgtuVv(ivv) => {
-                write!(f, "vmsgtu.vv {}", ivv)
-            }
+            VInst::VmsgtuVv(Ivv { vd, vs2, vs1, vm }) => VInst::VmsltuVv(Ivv {
+                vd: *vd,
+                vm: *vm,
+                vs2: *vs1,
+                vs1: *vs2,
+            })
+            .fmt(f),
             VInst::VmsgtuVx(ivx) => {
                 write!(f, "vmsgtu.vx {}", ivx)
             }
             VInst::VmsgtuVi(ivi) => {
                 write!(f, "vmsgtu.vi {}", ivi)
             }
-            VInst::VmsgeuVv(ivv) => {
-                write!(f, "vmsgeu.vv {}", ivv)
-            }
+            VInst::VmsgeuVv(Ivv { vd, vs2, vs1, vm }) => VInst::VmsleuVv(Ivv {
+                vd: *vd,
+                vm: *vm,
+                vs2: *vs1,
+                vs1: *vs2,
+            })
+            .fmt(f),
             VInst::VfirstM { rd, vs2, vm } => {
                 let mut output = format!("{}, {}", rd, vs2);
                 if *vm {

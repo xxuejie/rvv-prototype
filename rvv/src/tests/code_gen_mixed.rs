@@ -43,7 +43,7 @@ fn test_simple() {
 }
 
 #[test]
-fn test_u256() {
+fn test_u256_mixed() {
     let input = quote! {
         fn comp_u256(x: U256, y: U256, mut z: U256, w: U256) -> U256 {
             let x_bytes = x.to_le_bytes();
@@ -140,7 +140,7 @@ fn test_u256() {
                 unsafe { core::mem::transmute::<[u8; 32usize], U256>(tmp_rvv_vector_buf) }
             };
             if {
-                let _ = "vmsgtu.vv v4, v1, v2 - 1746960983";
+                let _ = "vmsltu.vv v4, v2, v1 - 1746960983";
                 unsafe {
                     asm ! (".byte {0}, {1}, {2}, {3}" , const 87u8 , const 130u8 , const 32u8 , const 104u8 ,)
                 }
