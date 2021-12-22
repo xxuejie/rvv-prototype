@@ -405,7 +405,7 @@ impl CodegenContext {
             }
             /*
             vmul.vv v1, v2, v3
-            vmsne.vi v4 v1, 0
+            vmsne.vi v4 v2, 0
             vfirst.m t0, v4
             if t0 == 0 {
                 vdivu.vv v4, v1, v2
@@ -454,12 +454,22 @@ impl CodegenContext {
                 self.checked_sub(&mut tokens, VInst::VsubVv(ivv), ivv, bit_length)
                     .map_err(|err| (expr.expr.1, err))?;
             }
+
             /*
-            let (value, overflow) = self.overflowing_mul(other);
-            if overflow {
-                None
+            vmul.vv v1, v2, v3
+            vmsne.vi v4 v2, 0
+            vfirst.m t0, v4
+            if t0 == 0 {
+                vdivu.vv v4, v1, v2
+                vmsne.vv v4, v4, v3
+                vfirst.m t1, v4
+                if t1 == 0 {
+                    None
+                } else {
+                    Some(v1)
+                }
             } else {
-                Some(value)
+                Some(v1)
             }
              */
             "checked_mul" => {
@@ -482,7 +492,14 @@ impl CodegenContext {
                     .map_err(|err| (expr.expr.1, err))?;
             }
             /*
-            => Same as checked_div()
+            vmseq.vi v4, v2, 0  # (v2 == vs1)
+            vfirst.m t0, v4
+            if t0 == 0 {
+                None
+            } else {
+                vdivu.vv v1, v2, v3
+                Some(v1)
+            }
              */
             "checked_rem" => {
                 self.simple_checked_codegen(&mut tokens, VInst::VremuVv(ivv), ivv, bit_length)
@@ -997,7 +1014,7 @@ impl CodegenContext {
         let mut inner_tokens = TokenStream::new();
 
         // vmul.vv v1, v2, v3
-        // vmsne.vi v4 v1, 0
+        // vmsne.vi v4 v2, 0
         // vfirst.m t0, v4
         for inst in [
             VInst::VmulVv(ivv),
