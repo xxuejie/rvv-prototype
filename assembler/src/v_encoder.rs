@@ -423,7 +423,7 @@ fn encode_vai(dst: u8, funct3: u8, src1: u8, src2: u8, vm: bool, funct6: u8) -> 
     value = set_bits(value, OFFSET_FUNCT3, funct3 as u32);
     value = set_bits(value, OFFSET_SRC1, src1 as u32);
     value = set_bits(value, OFFSET_SRC2, src2 as u32);
-    if vm {
+    if !vm {
         value = set_bits(value, OFFSET_VM, 1);
     }
     value = set_bits(value, OFFSET_FUNCT6, funct6 as u32);
@@ -905,7 +905,7 @@ impl VInst {
                 let mut value = 0b010000_0_00000_10001_010_00000_1010111;
                 value = set_bits(value, OFFSET_DST, rd as u8 as u32);
                 value = set_bits(value, OFFSET_SRC2, vs2 as u8 as u32);
-                if vm {
+                if !vm {
                     value = set_bits(value, OFFSET_VM, 1);
                 }
                 return value;
@@ -932,7 +932,7 @@ impl VInst {
             VInst::VleV { width, vd, rs1, vm } => {
                 let (funct3, mew) = width_bits(width);
                 let lumop: u8 = 0b00000;
-                let vm = if vm { 1 } else { 0 };
+                let vm = if !vm { 1 } else { 0 };
                 let mop: u8 = MOP_UNIT_STRIDE;
                 let mut rest: u32 = lumop as u32;
                 rest = set_bits(rest, 5, vm);
@@ -950,7 +950,7 @@ impl VInst {
             } => {
                 let (funct3, mew) = width_bits(width);
                 let sumop: u8 = 0b00000;
-                let vm = if vm { 1 } else { 0 };
+                let vm = if !vm { 1 } else { 0 };
                 let mop: u8 = MOP_UNIT_STRIDE;
                 let mut rest: u32 = sumop as u32;
                 rest = set_bits(rest, 5, vm);
