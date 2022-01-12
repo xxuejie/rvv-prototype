@@ -14,7 +14,7 @@ jobs:
         cd ..
         git clone -b rvv https://github.com/mohanson/ckb-standalone-debugger
         cd ckb-standalone-debugger/bins
-        cargo install --path . -f
+        cargo install --path . -f --locked
     - name: Run rvv unit tests
       run: cd rvv && cargo test && cargo test --features=simulator
     - name: Run rvv-tests simulator/rvv-asm/raw tests
