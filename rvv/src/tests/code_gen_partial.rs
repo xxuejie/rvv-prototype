@@ -23,27 +23,24 @@ fn test_u256_ops_add() {
     #[cfg(not(feature = "simulator"))]
     let expected_output = quote! {
         fn ops_add(a: U256, b: U256) -> U256 {
+            let mut tmp_bool_save_t0: i64;
             let _ = "vsetvl zero, t0, e256, m1, ta, ma - 243462231";
+            unsafe { asm!("li t0, 1", ".byte 0x57, 0xf0, 0x82, 0x0e",) }
+            let _ = "vle256.v v1, (t0) - 302174343";
             unsafe {
-                asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 14u8 ,)
+                asm ! ("mv t0, {0}" , ".byte 0x87, 0xd0, 0x02, 0x12" , in (reg) a . as_ref () . as_ptr () ,)
             }
-            let _ = "vle256.v v1, (t0) - 268619911";
+            let _ = "vle256.v v2, (t0) - 302174471";
             unsafe {
-                asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) a . as_ref () . as_ptr () , const 135u8 , const 208u8 , const 2u8 , const 16u8 ,)
-            }
-            let _ = "vle256.v v2, (t0) - 268620039";
-            unsafe {
-                asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) b . as_ref () . as_ptr () , const 7u8 , const 209u8 , const 2u8 , const 16u8 ,)
+                asm ! ("mv t0, {0}" , ".byte 0x07, 0xd1, 0x02, 0x12" , in (reg) b . as_ref () . as_ptr () ,)
             }
             {
-                let _ = "vadd.vv v3, v1, v2 - 1114583";
+                let _ = "vadd.vv v3, v1, v2 - 34669015";
+                unsafe { asm!(".byte 0xd7, 0x01, 0x11, 0x02") }
+                let _ = "vse256.v v3, (t0) - 302174631";
+                let mut tmp_rvv_vector_buf: [u8; 32usize];
                 unsafe {
-                    asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 1u8 , const 17u8 , const 0u8 ,)
-                }
-                let _ = "vse256.v v3, (t0) - 268620199";
-                let mut tmp_rvv_vector_buf = [0u8; 32usize];
-                unsafe {
-                    asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 167u8 , const 209u8 , const 2u8 , const 16u8 ,)
+                    asm ! ("mv t0, {0}" , ".byte 0xa7, 0xd1, 0x02, 0x12" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () ,)
                 }
                 unsafe { core::mem::transmute::<[u8; 32usize], U256>(tmp_rvv_vector_buf) }
             }
@@ -74,27 +71,24 @@ fn test_u256_ops_sub() {
     #[cfg(not(feature = "simulator"))]
     let expected_output = quote! {
         fn ops_sub(a: U256, b: U256) -> U256 {
+            let mut tmp_bool_save_t0: i64;
             let _ = "vsetvl zero, t0, e256, m1, ta, ma - 243462231";
+            unsafe { asm!("li t0, 1", ".byte 0x57, 0xf0, 0x82, 0x0e",) }
+            let _ = "vle256.v v1, (t0) - 302174343";
             unsafe {
-                asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 14u8 ,)
+                asm ! ("mv t0, {0}" , ".byte 0x87, 0xd0, 0x02, 0x12" , in (reg) a . as_ref () . as_ptr () ,)
             }
-            let _ = "vle256.v v1, (t0) - 268619911";
+            let _ = "vle256.v v2, (t0) - 302174471";
             unsafe {
-                asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) a . as_ref () . as_ptr () , const 135u8 , const 208u8 , const 2u8 , const 16u8 ,)
-            }
-            let _ = "vle256.v v2, (t0) - 268620039";
-            unsafe {
-                asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) b . as_ref () . as_ptr () , const 7u8 , const 209u8 , const 2u8 , const 16u8 ,)
+                asm ! ("mv t0, {0}" , ".byte 0x07, 0xd1, 0x02, 0x12" , in (reg) b . as_ref () . as_ptr () ,)
             }
             {
-                let _ = "vsub.vv v3, v1, v2 - 135332311";
+                let _ = "vsub.vv v3, v1, v2 - 168886743";
+                unsafe { asm!(".byte 0xd7, 0x01, 0x11, 0x0a") }
+                let _ = "vse256.v v3, (t0) - 302174631";
+                let mut tmp_rvv_vector_buf: [u8; 32usize];
                 unsafe {
-                    asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 1u8 , const 17u8 , const 8u8 ,)
-                }
-                let _ = "vse256.v v3, (t0) - 268620199";
-                let mut tmp_rvv_vector_buf = [0u8; 32usize];
-                unsafe {
-                    asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () , const 167u8 , const 209u8 , const 2u8 , const 16u8 ,)
+                    asm ! ("mv t0, {0}" , ".byte 0xa7, 0xd1, 0x02, 0x12" , in (reg) tmp_rvv_vector_buf . as_mut_ptr () ,)
                 }
                 unsafe { core::mem::transmute::<[u8; 32usize], U256>(tmp_rvv_vector_buf) }
             }
@@ -507,21 +501,19 @@ fn test_u256_ops_add_assign() {
     let expected_output = quote! {
         fn ops_add_assign(mut a: U256, b: U256) {
             let _ = "vsetvl zero, t0, e256, m1, ta, ma - 243462231";
+            unsafe { asm!("li t0, 1", ".byte 0x57, 0xf0, 0x82, 0x0e",) }
+            let _ = "vle256.v v1, (t0) - 302174343";
+            let _tmp_t0_saved: i64;
             unsafe {
-                asm ! ("li t0, 1" , ".byte {0}, {1}, {2}, {3}" , const 87u8 , const 240u8 , const 130u8 , const 14u8 ,)
+                asm ! ("mv {0}, t0", "mv t0, {1}" , ".byte 0x87, 0xd0, 0x02, 0x12" , "mv t0, {0}" , inout (reg) _tmp_t0_saved , in (reg) a . as_ref () . as_ptr () ,)
             }
-            let _ = "vle256.v v1, (t0) - 268619911";
+            let _ = "vle256.v v2, (t0) - 302174471";
+            let _tmp_t0_saved: i64;
             unsafe {
-                asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) a . as_ref () . as_ptr () , const 135u8 , const 208u8 , const 2u8 , const 16u8 ,)
+                asm ! ("mv {0}, t0", "mv t0, {1}" , ".byte 0x07, 0xd1, 0x02, 0x12" , "mv t0, {0}" , inout (reg) _tmp_t0_saved , in (reg) b . as_ref () . as_ptr () ,)
             }
-            let _ = "vle256.v v2, (t0) - 268620039";
-            unsafe {
-                asm ! ("mv t0, {0}" , ".byte {1}, {2}, {3}, {4}" , in (reg) b . as_ref () . as_ptr () , const 7u8 , const 209u8 , const 2u8 , const 16u8 ,)
-            }
-            let _ = "vadd.vv v1, v1, v2 - 1114327";
-            unsafe {
-                asm ! (".byte {0}, {1}, {2}, {3}" , const 215u8 , const 0u8 , const 17u8 , const 0u8 ,)
-            };
+            let _ = "vadd.vv v1, v1, v2 - 34668759";
+            unsafe { asm!(".byte 0xd7, 0x00, 0x11, 0x02") };
         }
     };
     run_rvv_test(input, expected_output);

@@ -120,10 +120,10 @@ fn method_wrapping_mul(a: U256, b: U256) -> U256 {
 fn method_overflowing_mul(a: U256, b: U256) -> U256 {
     a.overflowing_mul(b).0
 }
-#[rvv_vector(show_asm)]
-fn method_checked_mul(a: U256, b: U256) -> Option<U256> {
-    a.checked_mul(b)
-}
+// #[rvv_vector(show_asm)]
+// fn method_checked_mul(a: U256, b: U256) -> Option<U256> {
+//     a.checked_mul(b)
+// }
 fn op_mul_raw(a: U256, b: U256) -> U256 {
     a.wrapping_mul(b)
 }
@@ -133,7 +133,7 @@ pub fn test_mul() {
     print_assert_eq!(op_mul_raw(a, b), op_mul(a, b), Uint);
     print_assert_eq!(op_mul_raw(a, b), method_wrapping_mul(a, b), Uint);
     print_assert_eq!(op_mul_raw(a, b), method_overflowing_mul(a, b), Uint);
-    print_assert_eq!(a.checked_mul(b), method_checked_mul(a, b));
+    // print_assert_eq!(a.checked_mul(b), method_checked_mul(a, b));
 }
 
 #[rvv_vector(show_asm)]
