@@ -15,6 +15,9 @@ mod type_checker;
 use code_gen::{CodegenContext, ToTokenStream};
 use type_checker::{CheckerContext, TypeChecker};
 
+#[cfg(test)]
+mod tests;
+
 // TODO: Support U256 [ops](https://doc.rust-lang.org/core/ops/index.html):
 //   Add          The addition operator +. (NOTE: actually wrapping_add)
 //   AddAssign    The addition assignment operator +=.

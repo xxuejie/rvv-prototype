@@ -3,6 +3,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::token;
 
+use super::RegInfo;
 use super::{CodegenContext, OpCategory, ToTokenStream};
 use crate::ast::{Expression, TypedExpression};
 use crate::SpannedError;
@@ -16,16 +17,51 @@ impl CodegenContext {
         expr: &TypedExpression,
         top_level: bool,
         extra_bind_id: Option<usize>,
+        exists_vd: Option<u8>,
         mut bit_length: u16,
     ) -> Result<TokenStream, SpannedError> {
         let (left, op, right, is_assign) = match &expr.expr.0 {
+            Expression::Assign { left, right, .. } => {
+                if let Some(var_ident) = left.expr.0.var_ident() {
+                    if let Some(vd) = self.var_regs.get(var_ident).cloned() {
+                        return self.gen_tokens(right, true, None, Some(vd), bit_length);
+                    }
+                }
+                let mut tokens = TokenStream::new();
+                left.to_tokens(&mut tokens, self)?;
+                token::Eq::default().to_tokens(&mut tokens);
+                right.to_tokens(&mut tokens, self)?;
+                return Ok(tokens)
+            }
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
+            Expression::Path(path) => {
+                let mut tokens = TokenStream::new();
+                if top_level {
+                    // Here assume this expression is the return value of current block
+                    if let Some(var_ident) = path.get_ident() {
+                        if let Some(vreg) = self.var_regs.get(var_ident).cloned() {
+                            for RegInfo{number, bit_length, ..} in self.expr_regs.values() {
+                                if *number == vreg {
+                                    vstore_codegen(&mut tokens, vreg, *bit_length, self.show_asm);
+                                    let mut rv = TokenStream::new();
+                                    token::Brace::default().surround(&mut rv, |inner| {
+                                        inner.extend(Some(tokens));
+                                    });
+                                    return Ok(rv);
+                                }
+                            }
+                        }
+                    }
+                }
+                path.to_tokens(&mut tokens);
+                return Ok(tokens);
+            }
             Expression::MethodCall { receiver, method, args, .. } => {
                 return self.gen_method_call_tokens(expr, receiver, method, args, top_level, extra_bind_id, bit_length);
             }
             Expression::Paren { expr: sub_expr, .. } => {
-                return self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length);
+                return self.gen_tokens(&*sub_expr, top_level, Some(expr.id), exists_vd, bit_length);
             }
             _  => return Err((expr.expr.1, anyhow!("invalid expression, inner expression must be simple variable name or binary op"))),
         };
@@ -59,75 +95,44 @@ impl CodegenContext {
                 }
             };
         }
-        self.update_vconfig(&mut tokens, bit_length);
 
-        for typed_expr in [left, right] {
-            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
-                if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(typed_expr.id, (*vreg, bit_length));
-                } else {
-                    // Load{256,512,1024}
-                    let vreg = self.v_registers.next_register().ok_or_else(|| {
+        self.update_vconfig(&mut tokens, bit_length);
+        self.gen_sub_exprs(&mut tokens, left, right, bit_length)?;
+
+        let op_category = OpCategory::from(op);
+        let RegInfo {
+            number: vs2,
+            bit_length: bit_len2,
+            ..
+        } = self.expr_regs.get(&left.id).cloned().unwrap();
+        let RegInfo {
+            number: vs1,
+            bit_length: bit_len1,
+            ..
+        } = self.expr_regs.get(&right.id).cloned().unwrap();
+        assert_eq!(bit_len1, bit_len2);
+        let vd = if let Some(vd) = exists_vd {
+            vd
+        } else {
+            match op_category {
+                OpCategory::Binary | OpCategory::Bool => {
+                    let vd = self.v_registers.alloc().ok_or_else(|| {
                         (
-                            typed_expr.expr.1,
+                            expr.expr.1,
                             anyhow!("not enough V register for this expression"),
                         )
                     })?;
-                    // FIXME: t0 register may already used by Rust code
-                    let inst = VInst::VleV {
-                        width: bit_length,
-                        vd: VReg::from_u8(vreg),
-                        rs1: XReg::T0,
-                        vm: false,
-                    };
-                    let [b0, b1, b2, b3] = inst.encode_bytes();
-                    if self.show_asm {
-                        let comment = format!("{} - {}", inst.encode_u32(), inst);
-                        tokens.extend(Some(quote! {
-                            let _ = #comment;
-                        }));
-                    }
-                    let ts = quote! {
-                        unsafe {
-                            asm!(
-                                "mv t0, {0}",
-                                ".byte {1}, {2}, {3}, {4}",
-                                in(reg) #var_ident.as_ref().as_ptr(),
-                                const #b0, const #b1, const #b2, const #b3,
-                            )
-                        }
-                    };
-                    tokens.extend(Some(ts));
-                    self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(typed_expr.id, (vreg, bit_length));
+                    self.expr_regs
+                        .insert(expr.id, RegInfo::new(vd, bit_len1, None));
+                    vd
                 }
-            } else {
-                let ts = self.gen_tokens(typed_expr, false, None, bit_length)?;
-                tokens.extend(Some(ts));
+                OpCategory::AssignOp => vs2,
             }
-        }
-
-        let op_category = OpCategory::from(op);
-        let (svreg2, bit_len2) = *self.expr_regs.get(&left.id).unwrap();
-        let (svreg1, bit_len1) = *self.expr_regs.get(&right.id).unwrap();
-        assert_eq!(bit_len1, bit_len2);
-        let dvreg = match op_category {
-            OpCategory::Binary | OpCategory::Bool => {
-                let dvreg = self.v_registers.next_register().ok_or_else(|| {
-                    (
-                        expr.expr.1,
-                        anyhow!("not enough V register for this expression"),
-                    )
-                })?;
-                self.expr_regs.insert(expr.id, (dvreg, bit_len1));
-                dvreg
-            }
-            OpCategory::AssignOp => svreg1,
         };
         let ivv = Ivv {
-            vd: VReg::from_u8(dvreg),
-            vs2: VReg::from_u8(svreg2),
-            vs1: VReg::from_u8(svreg1),
+            vd: VReg::from_u8(vd),
+            vs2: VReg::from_u8(vs2),
+            vs1: VReg::from_u8(vs1),
             vm: false,
         };
         let inst = match op {
@@ -182,58 +187,37 @@ impl CodegenContext {
             // The `>` operator (greater than)
             syn::BinOp::Gt(_) => VInst::VmsgtuVv(ivv),
         };
-        let [b0, b1, b2, b3] = inst.encode_bytes();
         if self.show_asm {
-            let comment = format!("{} - {}", inst, inst.encode_u32());
+            let comment = inst_to_comment(&inst);
             tokens.extend(Some(quote! {
                 let _ = #comment;
             }));
         }
+        let inst_string = inst_to_string(&inst);
         let ts = quote! {
             unsafe {
-                asm!(".byte {0}, {1}, {2}, {3}", const #b0, const #b1, const #b2, const #b3,)
+                asm!(#inst_string)
             }
         };
         tokens.extend(Some(ts));
 
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some((dvreg, bit_len)) = self.expr_regs.get(&expr.id).cloned() {
-                self.expr_regs.insert(extra_expr_id, (dvreg, bit_len));
+            if let Some(info) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, info);
             }
         }
+        self.free_sub_exprs(expr.id, left.id, right.id);
 
         match op_category {
-            OpCategory::Binary if top_level => {
-                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
-                let inst = VInst::VseV {
-                    width: bit_length,
-                    vs3: VReg::from_u8(vreg),
-                    rs1: XReg::T0,
-                    vm: false,
+            OpCategory::Binary if top_level && exists_vd.is_none() => {
+                let vreg = {
+                    let reg_info = self.expr_regs.get_mut(&expr.id).unwrap();
+                    self.v_registers.free(reg_info.number);
+                    reg_info.is_freed = true;
+                    reg_info.number
                 };
-                let [b0, b1, b2, b3] = inst.encode_bytes();
-                if self.show_asm {
-                    let comment = format!("{} - {}", inst, inst.encode_u32());
-                    tokens.extend(Some(quote! {
-                        let _ = #comment;
-                    }));
-                }
-                let uint_type = quote::format_ident!("U{}", bit_length);
-                let buf_length = bit_length as usize / 8;
-                tokens.extend(Some(quote! {
-                    let mut tmp_rvv_vector_buf = [0u8; #buf_length];
-                    unsafe {
-                        asm!(
-                            "mv t0, {0}",
-                            // This should be vse{256, 512, 1024}
-                            ".byte {1}, {2}, {3}, {4}",
-                            in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                            const #b0, const #b1, const #b2, const #b3,
-                        )
-                    }
-                    unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) }
-                }));
+                vstore_codegen(&mut tokens, vreg, bit_length, self.show_asm);
                 let mut rv = TokenStream::new();
                 token::Brace::default().surround(&mut rv, |inner| {
                     inner.extend(Some(tokens));
@@ -242,30 +226,38 @@ impl CodegenContext {
             }
             OpCategory::Binary | OpCategory::AssignOp => Ok(tokens),
             OpCategory::Bool => {
-                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
+                let vreg = {
+                    let reg_info = self.expr_regs.get_mut(&expr.id).unwrap();
+                    self.v_registers.free(reg_info.number);
+                    reg_info.is_freed = true;
+                    reg_info.number
+                };
                 let inst = VInst::VfirstM {
                     rd: XReg::T0,
                     vs2: VReg::from_u8(vreg),
                     vm: false,
                 };
-                let [b0, b1, b2, b3] = inst.encode_bytes();
                 if self.show_asm {
-                    let comment = format!("{} - {}", inst, inst.encode_u32());
+                    let comment = inst_to_comment(&inst);
                     tokens.extend(Some(quote! {
                         let _ = #comment;
-                        let _ = "mv {tmp_rv_t0}, t0";
+                        // let _ = "mv {tmp_bool_t0}, t0";
                     }));
                 }
+                let inst_string = inst_to_string(&inst);
                 tokens.extend(Some(quote! {
+                    let _tmp_t0_saved: i64;
                     let tmp_bool_t0: i64;
                     // t0: 0  (vms* success)
                     // t0: -1 (not found)
                     unsafe {
                         asm!(
                             // This should be vfirst.m t0, vrs2
-                            ".byte {0}, {1}, {2}, {3}",
-                            "mv {4}, t0",
-                            const #b0, const #b1, const #b2, const #b3,
+                            "mv {0}, t0",
+                            #inst_string,
+                            "mv {1}, t0",
+                            "mv t0, {0}",
+                            out (reg) _tmp_t0_saved,
                             out (reg) tmp_bool_t0,
                         )
                     }
@@ -297,7 +289,7 @@ impl CodegenContext {
             _ => self
                 .expr_regs
                 .get(&expr.id)
-                .map(|(_, bit_len)| *bit_len)
+                .map(|info| info.bit_length)
                 .unwrap_or(0),
         };
         if top_level {
@@ -332,73 +324,38 @@ impl CodegenContext {
 
         let left = &receiver;
         let right = &args[0];
-        for typed_expr in [left, right] {
-            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
-                if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(typed_expr.id, (*vreg, bit_length));
-                } else {
-                    // Load{256,512,1024}
-                    let vreg = self.v_registers.next_register().ok_or_else(|| {
-                        (
-                            typed_expr.expr.1,
-                            anyhow!("not enough V register for this expression"),
-                        )
-                    })?;
-                    // FIXME: t0 register may already used by Rust code
-                    let inst = VInst::VleV {
-                        width: bit_length,
-                        vd: VReg::from_u8(vreg),
-                        rs1: XReg::T0,
-                        vm: false,
-                    };
-                    let [b0, b1, b2, b3] = inst.encode_bytes();
-                    if self.show_asm {
-                        let comment = format!("{} - {}", inst.encode_u32(), inst);
-                        tokens.extend(Some(quote! {
-                            let _ = #comment;
-                        }));
-                    }
-                    let ts = quote! {
-                        unsafe {
-                            asm!(
-                                "mv t0, {0}",
-                                ".byte {1}, {2}, {3}, {4}",
-                                in(reg) #var_ident.as_ref().as_ptr(),
-                                const #b0, const #b1, const #b2, const #b3,
-                            )
-                        }
-                    };
-                    tokens.extend(Some(ts));
-                    self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(typed_expr.id, (vreg, bit_length));
-                }
-            } else {
-                let ts = self.gen_tokens(typed_expr, false, None, bit_length)?;
-                tokens.extend(Some(ts));
-            }
-        }
+        self.gen_sub_exprs(&mut tokens, left, right, bit_length)?;
 
-        let (svreg2, bit_len2) = *self.expr_regs.get(&left.id).unwrap();
-        let (svreg1, bit_len1) = *self.expr_regs.get(&right.id).unwrap();
+        let RegInfo {
+            number: vs2,
+            bit_length: bit_len2,
+            ..
+        } = *self.expr_regs.get(&left.id).unwrap();
+        let RegInfo {
+            number: vs1,
+            bit_length: bit_len1,
+            ..
+        } = *self.expr_regs.get(&right.id).unwrap();
         assert_eq!(bit_len1, bit_len2);
-        let dvreg = self.v_registers.next_register().ok_or_else(|| {
+        let vd = self.v_registers.alloc().ok_or_else(|| {
             (
                 expr.expr.1,
                 anyhow!("not enough V register for this expression"),
             )
         })?;
-        self.expr_regs.insert(expr.id, (dvreg, bit_len1));
+        self.expr_regs
+            .insert(expr.id, RegInfo::new(vd, bit_len1, None));
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some((dvreg, bit_len)) = self.expr_regs.get(&expr.id).cloned() {
-                self.expr_regs.insert(extra_expr_id, (dvreg, bit_len));
+            if let Some(info) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, info);
             }
         }
 
         let ivv = Ivv {
-            vd: VReg::from_u8(dvreg),
-            vs2: VReg::from_u8(svreg2),
-            vs1: VReg::from_u8(svreg1),
+            vd: VReg::from_u8(vd),
+            vs2: VReg::from_u8(vs2),
+            vs1: VReg::from_u8(vs1),
             vm: false,
         };
 
@@ -451,13 +408,13 @@ impl CodegenContext {
             }
             /*
             vmul.vv v1, v2, v3
-            vmsne.vi v4 v1, 0
+            vmsne.vi v4 v2, 0
             vfirst.m t0, v4
             if t0 == 0 {
                 vdivu.vv v4, v1, v2
                 vmsne.vv v4, v4, v3
-                vfirst.m t1, v4
-                (v1, t1 == 0)
+                vfirst.m t0, v4
+                (v1, t0 == 0)
             } else {
                 (v1, false)
             }
@@ -500,12 +457,22 @@ impl CodegenContext {
                 self.checked_sub(&mut tokens, VInst::VsubVv(ivv), ivv, bit_length)
                     .map_err(|err| (expr.expr.1, err))?;
             }
+
             /*
-            let (value, overflow) = self.overflowing_mul(other);
-            if overflow {
-                None
+            vmul.vv v1, v2, v3
+            vmsne.vi v4 v2, 0
+            vfirst.m t0, v4
+            if t0 == 0 {
+                vdivu.vv v4, v1, v2
+                vmsne.vv v4, v4, v3
+                vfirst.m t0, v4
+                if t0 == 0 {
+                    None
+                } else {
+                    Some(v1)
+                }
             } else {
-                Some(value)
+                Some(v1)
             }
              */
             "checked_mul" => {
@@ -528,7 +495,14 @@ impl CodegenContext {
                     .map_err(|err| (expr.expr.1, err))?;
             }
             /*
-            => Same as checked_div()
+            vmseq.vi v4, v2, 0  # (v2 == vs1)
+            vfirst.m t0, v4
+            if t0 == 0 {
+                None
+            } else {
+                vdivu.vv v1, v2, v3
+                Some(v1)
+            }
              */
             "checked_rem" => {
                 self.simple_checked_codegen(&mut tokens, VInst::VremuVv(ivv), ivv, bit_length)
@@ -546,8 +520,8 @@ impl CodegenContext {
             if t0 == 0 {
                 vdivu.vv v4, v1, v2
                 vmsne.vv v4, v4, v3
-                vfirst.m t1, v4
-                if t1 == 0 {
+                vfirst.m t0, v4
+                if t0 == 0 {
                     Uxx::max_value()
                 } else {
                     v1
@@ -563,6 +537,8 @@ impl CodegenContext {
             _ => {}
         };
 
+        self.free_sub_exprs(expr.id, left.id, right.id);
+
         let is_simple_asm = matches!(
             method_string.as_str(),
             "wrapping_add"
@@ -576,36 +552,42 @@ impl CodegenContext {
 
         if top_level {
             if is_simple_asm {
-                let (vreg, _bit_len) = *self.expr_regs.get(&expr.id).unwrap();
+                let vreg = {
+                    let reg_info = self.expr_regs.get_mut(&expr.id).unwrap();
+                    self.v_registers.free(reg_info.number);
+                    reg_info.is_freed = true;
+                    reg_info.number
+                };
                 let inst = VInst::VseV {
                     width: bit_length,
                     vs3: VReg::from_u8(vreg),
                     rs1: XReg::T0,
                     vm: false,
                 };
-                let [b0, b1, b2, b3] = inst.encode_bytes();
                 if self.show_asm {
-                    let comment0 = "mv t0, {tmp_rvv_vector_buf}";
-                    let comment1 = format!("{} - {}", inst, inst.encode_u32());
+                    let comment1 = inst_to_comment(&inst);
                     tokens.extend(Some(quote! {
-                        let _ = #comment0;
                         let _ = #comment1;
                     }));
                 }
                 let uint_type = quote::format_ident!("U{}", bit_length);
                 let buf_length = bit_length as usize / 8;
+                let inst_string = inst_to_string(&inst);
                 tokens.extend(Some(quote! {
-                    let mut tmp_rvv_vector_buf = [0u8; #buf_length];
+                    let _tmp_t0_saved: i64;
+                    let mut tmp_rvv_vector_buf: core::mem::MaybeUninit<[u8; #buf_length]> = core::mem::MaybeUninit::uninit();
                     unsafe {
                         asm!(
-                            "mv t0, {0}",
+                            "mv {0}, t0",
+                            "mv t0, {1}",
                             // This should be vse{256, 512, 1024}
-                            ".byte {1}, {2}, {3}, {4}",
+                            #inst_string,
+                            "mv t0, {0}",
+                            out(reg) _tmp_t0_saved,
                             in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                            const #b0, const #b1, const #b2, const #b3,
                         )
                     }
-                    unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) }
+                    unsafe { core::mem::transmute::<_, #uint_type>(tmp_rvv_vector_buf) }
                 }));
             }
             let mut rv = TokenStream::new();
@@ -618,7 +600,145 @@ impl CodegenContext {
         }
     }
 
-    pub(crate) fn update_vconfig(&mut self, tokens: &mut TokenStream, bit_length: u16) {
+    fn gen_sub_exprs(
+        &mut self,
+        tokens: &mut TokenStream,
+        left: &TypedExpression,
+        right: &TypedExpression,
+        bit_length: u16,
+    ) -> Result<(), SpannedError> {
+        for typed_expr in [left, right] {
+            if let Some(var_ident) = typed_expr.expr.0.var_ident() {
+                if let Some(vreg) = self.var_regs.get(var_ident) {
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(*vreg, bit_length, Some(var_ident.clone())),
+                    );
+                } else {
+                    // Load{256,512,1024}
+                    let vreg = self.v_registers.alloc().ok_or_else(|| {
+                        (
+                            typed_expr.expr.1,
+                            anyhow!("not enough V register for this expression"),
+                        )
+                    })?;
+                    let inst = VInst::VleV {
+                        width: bit_length,
+                        vd: VReg::from_u8(vreg),
+                        rs1: XReg::T0,
+                        vm: false,
+                    };
+                    if self.show_asm {
+                        let comment = inst_to_comment(&inst);
+                        tokens.extend(Some(quote! {
+                            let _ = #comment;
+                        }));
+                    }
+                    let inst_string = inst_to_string(&inst);
+                    let ts = quote! {
+                        let _tmp_t0_saved: i64;
+                        unsafe {
+                            asm!(
+                                "mv {0}, t0",
+                                "mv t0, {1}",
+                                #inst_string,
+                                "mv t0, {0}",
+                                out(reg) _tmp_t0_saved,
+                                in(reg) #var_ident.as_ref().as_ptr(),
+                            )
+                        }
+                    };
+                    tokens.extend(Some(ts));
+                    self.var_regs.insert(var_ident.clone(), vreg);
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(vreg, bit_length, Some(var_ident.clone())),
+                    );
+                }
+            } else {
+                let ts = self.gen_tokens(typed_expr, false, None, None, bit_length)?;
+                tokens.extend(Some(ts));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn gen_inputs_tokens(
+        &mut self,
+        tokens: &mut TokenStream,
+    ) -> Result<(), SpannedError> {
+        if let Some(fn_args) = self.fn_args.take() {
+            let mut args = fn_args
+                .into_iter()
+                .filter(|fn_arg| {
+                    self.variables
+                        .get(&fn_arg.name)
+                        .map(|info| !info.is_unused())
+                        .expect("function input variable")
+                })
+                .filter_map(|fn_arg| {
+                    let bit_length: u16 = match fn_arg.ty.0.type_name().as_deref() {
+                        Some("U256") => 256,
+                        Some("U512") => 512,
+                        Some("U1024") => 1024,
+                        _ => 0,
+                    };
+                    if bit_length > 0 {
+                        Some((fn_arg, bit_length))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            args.sort_by_key(|(_, bit_length)| *bit_length);
+
+            for (fn_arg, bit_length) in args {
+                self.update_vconfig(tokens, bit_length);
+                // Load{256,512,1024}
+                let vreg = match self.v_registers.alloc() {
+                    Some(vreg) => vreg,
+                    None => {
+                        return Err((
+                            fn_arg.span,
+                            anyhow!("not enough V register for function argument"),
+                        ));
+                    }
+                };
+                let inst = VInst::VleV {
+                    width: bit_length,
+                    vd: VReg::from_u8(vreg),
+                    rs1: XReg::T0,
+                    vm: false,
+                };
+                if self.show_asm {
+                    let comment = inst_to_comment(&inst);
+                    tokens.extend(Some(quote! {
+                        let _ = #comment;
+                    }));
+                }
+                let var_ident = fn_arg.name;
+                let inst_string = inst_to_string(&inst);
+                let ts = quote! {
+                    let _tmp_t0_saved: i64;
+                    unsafe {
+                        asm!(
+                            "mv {0}, t0",
+                            "mv t0, {1}",
+                            #inst_string,
+                            "mv t0, {0}",
+                            out(reg) _tmp_t0_saved,
+                            in(reg) #var_ident.as_ref().as_ptr(),
+                        )
+                    }
+                };
+                tokens.extend(Some(ts));
+                self.var_regs.insert(var_ident.clone(), vreg);
+            }
+        }
+        Ok(())
+    }
+
+    fn update_vconfig(&mut self, tokens: &mut TokenStream, bit_length: u16) {
         // vsetvli x0, t0, e{256,512,1024}, m1, ta, ma
         let v_config = VConfig::Vsetvli {
             rd: XReg::Zero,
@@ -628,25 +748,47 @@ impl CodegenContext {
         if self.v_config.as_ref() != Some(&v_config) {
             self.v_config = Some(v_config);
             let inst = VInst::VConfig(v_config);
-            let [b0, b1, b2, b3] = inst.encode_bytes();
             if self.show_asm {
-                let comment0 = "li t0, 1";
-                let comment1 = format!("{} - {}", inst.encode_u32(), inst);
+                let comment1 = inst_to_comment(&inst);
                 tokens.extend(Some(quote! {
-                    let _ = #comment0;
                     let _ = #comment1;
                 }));
             }
+            let inst_string = inst_to_string(&inst);
             let ts = quote! {
                 unsafe {
                     asm!(
                         "li t0, 1",  // AVL = 1
-                        ".byte {0}, {1}, {2}, {3}",
-                        const #b0, const #b1, const #b2, const #b3,
+                        #inst_string,
                     )
                 }
             };
             tokens.extend(Some(ts));
+        }
+    }
+
+    fn free_sub_exprs(
+        &mut self,
+        current_expr_id: usize,
+        left_expr_id: usize,
+        right_expr_id: usize,
+    ) {
+        for sub_expr_id in [&left_expr_id, &right_expr_id] {
+            let sub_reg_info = self.expr_regs.get_mut(sub_expr_id).unwrap();
+            let should_free = if let Some(var_ident) = sub_reg_info.var_ident.as_ref() {
+                let var_info = self.variables.get(var_ident).unwrap();
+                var_info.end_expr_id <= current_expr_id
+            } else {
+                true
+            };
+            if should_free {
+                if !sub_reg_info.is_freed {
+                    self.v_registers.free(sub_reg_info.number);
+                    sub_reg_info.is_freed = true;
+                } else {
+                    panic!("double free expression: {}", sub_expr_id);
+                }
+            }
         }
     }
 
@@ -659,73 +801,77 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let eq_vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
         let mut inner_tokens = TokenStream::new();
-        for pre_inst in [
-            VInst::VmseqVi(Ivi {
-                vd: VReg::from_u8(eq_vd),
-                vs2: ivv.vs1,
-                imm: Imm(0),
-                vm: false,
-            }),
-            VInst::VfirstM {
-                rd: XReg::T0,
-                vs2: VReg::from_u8(eq_vd),
-                vm: false,
-            },
-        ] {
-            inst_codegen(&mut inner_tokens, pre_inst, self.show_asm);
-        }
-
+        let inst_mseq = VInst::VmseqVi(Ivi {
+            vd: VReg::from_u8(eq_vd),
+            vs2: ivv.vs1,
+            imm: Imm(0),
+            vm: false,
+        });
+        let inst_firstm = VInst::VfirstM {
+            rd: XReg::T0,
+            vs2: VReg::from_u8(eq_vd),
+            vm: false,
+        };
         let inst_store = VInst::VseV {
             width: bit_length,
             vs3: ivv.vd,
-            rs1: XReg::T1,
+            rs1: XReg::T0,
             vm: false,
         };
-        let [b0_inst, b1_inst, b2_inst, b3_inst] = inst.encode_bytes();
-        let [b0_store, b1_store, b2_store, b3_store] = inst_store.encode_bytes();
         let uint_type = quote::format_ident!("U{}", bit_length);
         let buf_length = bit_length as usize / 8;
 
         if self.show_asm {
-            let comment0 = "mv {tmp_bool_var}, t0";
-            let comment1 = format!("{} - {}", inst.encode_u32(), inst);
-            let comment2 = "mv t1, {tmp_rvv_vector_buf}";
-            let comment3 = format!("{} - {}", inst_store.encode_u32(), inst_store);
-            tokens.extend(Some(quote! {
+            let comment0 = inst_to_comment(&inst_mseq);
+            let comment1 = inst_to_comment(&inst_firstm);
+            let comment2 = inst_to_comment(&inst);
+            let comment3 = inst_to_comment(&inst_store);
+            inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
                 let _ = #comment2;
                 let _ = #comment3;
             }));
         }
+        let inst_mseq_string = inst_to_string(&inst_mseq);
+        let inst_firstm_string = inst_to_string(&inst_firstm);
+        let inst_string = inst_to_string(&inst);
+        let inst_store_string = inst_to_string(&inst_store);
         let ts = quote! {
-            let tmp_bool_var: i64;
+            let mut _tmp_t0_saved: i64;
+            let tmp_bool_t0: i64;
             // tn: 0  (vms* success)
             // tn: -1 (not found)
             unsafe {
                 asm!(
                     "mv {0}, t0",
-                    out(reg) tmp_bool_var,
+                    #inst_mseq_string,
+                    #inst_firstm_string,
+                    "mv {1}, t0",
+                    "mv t0, {0}",
+                    out(reg) _tmp_t0_saved,
+                    out(reg) tmp_bool_t0,
                 )
             }
-            if tmp_bool_var == 0 {
+            if tmp_bool_t0 == 0 {
                 None
             } else {
-                let mut tmp_rvv_vector_buf = [0u8; #buf_length];
+                let mut tmp_rvv_vector_buf: core::mem::MaybeUninit<[u8; #buf_length]> = core::mem::MaybeUninit::uninit();
                 unsafe {
                     asm!(
-                        ".byte {0}, {1}, {2}, {3}",
-                        "mv t1, {4}",
-                        ".byte {5}, {6}, {7}, {8}",
-                        const #b0_inst, const #b1_inst, const #b2_inst, const #b3_inst,
+                        "mv {0}, t0",
+                        #inst_string,
+                        "mv t0, {1}",
+                        #inst_store_string,
+                        "mv t0, {0}",
+                        out(reg) _tmp_t0_saved,
                         in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                        const #b0_store, const #b1_store, const #b2_store, const #b3_store,
                     )
                 }
-                Some(unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) })
+                Some(unsafe { core::mem::transmute::<_, #uint_type>(tmp_rvv_vector_buf) })
             }
         };
         inner_tokens.extend(Some(ts));
@@ -745,73 +891,78 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let lt_vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
         let mut inner_tokens = TokenStream::new();
-        for inst in [
-            VInst::VmsltuVv(Ivv {
-                vd: VReg::from_u8(lt_vd),
-                vs2: ivv.vs2,
-                vs1: ivv.vs1,
-                vm: false,
-            }),
-            VInst::VfirstM {
-                rd: XReg::T0,
-                vs2: VReg::from_u8(lt_vd),
-                vm: false,
-            },
-        ] {
-            inst_codegen(&mut inner_tokens, inst, self.show_asm);
-        }
 
+        let inst_msltu = VInst::VmsltuVv(Ivv {
+            vd: VReg::from_u8(lt_vd),
+            vs2: ivv.vs2,
+            vs1: ivv.vs1,
+            vm: false,
+        });
+        let inst_firstm = VInst::VfirstM {
+            rd: XReg::T0,
+            vs2: VReg::from_u8(lt_vd),
+            vm: false,
+        };
         let inst_store = VInst::VseV {
             width: bit_length,
             vs3: ivv.vd,
-            rs1: XReg::T1,
+            rs1: XReg::T0,
             vm: false,
         };
-        let [b0_inst, b1_inst, b2_inst, b3_inst] = inst.encode_bytes();
-        let [b0_store, b1_store, b2_store, b3_store] = inst_store.encode_bytes();
         let uint_type = quote::format_ident!("U{}", bit_length);
         let buf_length = bit_length as usize / 8;
 
         if self.show_asm {
-            let comment0 = "mv {tmp_bool_var}, t0";
-            let comment1 = format!("{} - {}", inst.encode_u32(), inst);
-            let comment2 = "mv t1, {tmp_rvv_vector_buf}";
-            let comment3 = format!("{} - {}", inst_store.encode_u32(), inst_store);
-            tokens.extend(Some(quote! {
+            let comment0 = inst_to_comment(&inst_msltu);
+            let comment1 = inst_to_comment(&inst_firstm);
+            let comment2 = inst_to_comment(&inst);
+            let comment3 = inst_to_comment(&inst_store);
+            inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
                 let _ = #comment2;
                 let _ = #comment3;
             }));
         }
+        let inst_msltu_string = inst_to_string(&inst_msltu);
+        let inst_firstm_string = inst_to_string(&inst_firstm);
+        let inst_string = inst_to_string(&inst);
+        let inst_store_string = inst_to_string(&inst_store);
         let ts = quote! {
-            let tmp_bool_var: i64;
+            let mut _tmp_t0_saved: i64;
+            let tmp_bool_t0: i64;
             // tn: 0  (vms* success)
             // tn: -1 (not found)
             unsafe {
                 asm!(
                     "mv {0}, t0",
-                    out(reg) tmp_bool_var,
+                    #inst_msltu_string,
+                    #inst_firstm_string,
+                    "mv {1}, t0",
+                    "mv t0, {0}",
+                    out(reg) _tmp_t0_saved,
+                    out(reg) tmp_bool_t0,
                 )
             }
-            if tmp_bool_var == 0 {
+            if tmp_bool_t0 == 0 {
                 None
             } else {
-                let mut tmp_rvv_vector_buf = [0u8; #buf_length];
+                let mut tmp_rvv_vector_buf: core::mem::MaybeUninit<[u8; #buf_length]> = core::mem::MaybeUninit::uninit();
                 unsafe {
                     asm!(
-                        ".byte {0}, {1}, {2}, {3}",
-                        "mv t1, {4}",
-                        ".byte {5}, {6}, {7}, {8}",
-                        const #b0_inst, const #b1_inst, const #b2_inst, const #b3_inst,
+                        #inst_string,
+                        "mv {0}, t0",
+                        "mv t0, {1}",
+                        #inst_store_string,
+                        "mv t0, {0}",
+                        out(reg) _tmp_t0_saved,
                         in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                        const #b0_store, const #b1_store, const #b2_store, const #b3_store,
                     )
                 }
-                Some(unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) })
+                Some(unsafe { core::mem::transmute::<_, #uint_type>(tmp_rvv_vector_buf) })
             }
         };
         inner_tokens.extend(Some(ts));
@@ -832,29 +983,27 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let lt_vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
         let mut inner_tokens = TokenStream::new();
-        for inst in [
-            inst,
-            VInst::VmsltuVv(Ivv {
-                vd: VReg::from_u8(lt_vd),
-                vs2: ivv.vd,
-                vs1: ivv.vs1,
-                vm: false,
-            }),
-            VInst::VfirstM {
-                rd: XReg::T0,
-                vs2: VReg::from_u8(lt_vd),
-                vm: false,
-            },
-        ] {
-            inst_codegen(&mut inner_tokens, inst, self.show_asm);
-        }
         if is_checked {
-            checked_rv_codegen(&mut inner_tokens, ivv.vd, bit_length, self.show_asm);
+            checked_rv_codegen(
+                &mut inner_tokens,
+                inst,
+                ivv,
+                lt_vd,
+                bit_length,
+                self.show_asm,
+            );
         } else {
-            overflowing_rv_codegen(&mut inner_tokens, ivv.vd, bit_length, self.show_asm);
+            overflowing_rv_codegen(
+                &mut inner_tokens,
+                inst,
+                ivv,
+                lt_vd,
+                bit_length,
+                self.show_asm,
+            );
         }
         token::Brace::default().surround(tokens, |inner| {
             inner.extend(Some(inner_tokens));
@@ -872,120 +1021,121 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
         let mut inner_tokens = TokenStream::new();
 
-        // vmul.vv v1, v2, v3
-        // vmsne.vi v4 v1, 0
-        // vfirst.m t0, v4
-        for inst in [
-            VInst::VmulVv(ivv),
-            VInst::VmsneVi(Ivi {
-                vd: VReg::from_u8(vd),
-                vs2: ivv.vd,
-                imm: Imm(0),
-                vm: false,
-            }),
-            VInst::VfirstM {
-                rd: XReg::T0,
-                vs2: VReg::from_u8(vd),
-                vm: false,
-            },
-        ] {
-            inst_codegen(&mut inner_tokens, inst, self.show_asm);
-        }
-
+        let inst_mul = VInst::VmulVv(ivv);
+        let inst_msne = VInst::VmsneVi(Ivi {
+            vd: VReg::from_u8(vd),
+            vs2: ivv.vd,
+            imm: Imm(0),
+            vm: false,
+        });
+        let inst_firstm1 = VInst::VfirstM {
+            rd: XReg::T0,
+            vs2: VReg::from_u8(vd),
+            vm: false,
+        };
         let inst_div = VInst::VdivuVv(Ivv {
             vd: VReg::from_u8(vd),
             vs2: ivv.vd,
             vs1: ivv.vs2,
             vm: false,
         });
-
         let inst_ne = VInst::VmsneVv(Ivv {
             vd: VReg::from_u8(vd),
             vs2: VReg::from_u8(vd),
             vs1: ivv.vs1,
             vm: false,
         });
-
-        let inst_firstm = VInst::VfirstM {
-            rd: XReg::T1,
+        let inst_firstm2 = VInst::VfirstM {
+            rd: XReg::T0,
             vs2: VReg::from_u8(vd),
             vm: false,
         };
         let inst_store = VInst::VseV {
             width: bit_length,
             vs3: ivv.vd,
-            rs1: XReg::T2,
+            rs1: XReg::T0,
             vm: false,
         };
 
-        let [b0_div, b1_div, b2_div, b3_div] = inst_div.encode_bytes();
-        let [b0_ne, b1_ne, b2_ne, b3_ne] = inst_ne.encode_bytes();
-        let [b0_firstm, b1_firstm, b2_firstm, b3_firstm] = inst_firstm.encode_bytes();
-        let [b0_store, b1_store, b2_store, b3_store] = inst_store.encode_bytes();
         let uint_type = quote::format_ident!("U{}", bit_length);
         let buf_length = bit_length as usize / 8;
         if self.show_asm {
-            let comment0 = "mv {tmp_bool_t0}, t0";
-            let comment1 = "mv t2, {tmp_rvv_vector_buf}";
-            let comment2 = format!("{} - {}", inst_store.encode_u32(), inst_store);
-            tokens.extend(Some(quote! {
-                let _ = #comment0;
-                let _ = #comment1;
-                let _ = #comment2;
-            }));
-        }
-        inner_tokens.extend(Some(quote! {
-            let tmp_bool_t0: i64;
-            let mut tmp_rvv_vector_buf = [0u8; #buf_length];
-            unsafe {
-                asm!(
-                    "mv {0}, t0",
-                    "mv t2, {1}",
-                    // vse{n}.v v1, (t2)
-                    ".byte {2}, {3}, {4}, {5}",
-                    out(reg) tmp_bool_t0,
-                    in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                    const #b0_store, const #b1_store, const #b2_store, const #b3_store,
-                )
-            }
-            let tmp_uint_rv = unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) };
-        }));
-        if self.show_asm {
-            let comment0 = format!("{} - {}", inst_div.encode_u32(), inst_div);
-            let comment1 = format!("{} - {}", inst_ne.encode_u32(), inst_ne);
-            let comment2 = format!("{} - {}", inst_firstm.encode_u32(), inst_firstm);
-            let comment3 = "mv {tmp_bool_t1}, t1";
-            tokens.extend(Some(quote! {
+            let comment0 = inst_to_comment(&inst_mul);
+            let comment1 = inst_to_comment(&inst_msne);
+            let comment2 = inst_to_comment(&inst_firstm1);
+            let comment3 = inst_to_comment(&inst_store);
+            inner_tokens.extend(Some(quote! {
                 let _ = #comment0;
                 let _ = #comment1;
                 let _ = #comment2;
                 let _ = #comment3;
             }));
         }
+        let inst_mul_string = inst_to_string(&inst_mul);
+        let inst_msne_string = inst_to_string(&inst_msne);
+        let inst_firstm1_string = inst_to_string(&inst_firstm1);
+        let inst_div_string = inst_to_string(&inst_div);
+        let inst_ne_string = inst_to_string(&inst_ne);
+        let inst_firstm2_string = inst_to_string(&inst_firstm2);
+        let inst_store_string = inst_to_string(&inst_store);
+        inner_tokens.extend(Some(quote! {
+            let mut _tmp_t0_saved: i64;
+            let mut tmp_bool_t0: i64;
+            let mut tmp_rvv_vector_buf: core::mem::MaybeUninit<[u8; #buf_length]> = core::mem::MaybeUninit::uninit();
+            unsafe {
+                asm!(
+                    "mv {0}, t0",
+                    // vmul.vv v1, v2, v3
+                    #inst_mul_string,
+                    // vmsne.vi v4 v2, 0
+                    #inst_msne_string,
+                    // vfirst.m t0, v4
+                    #inst_firstm1_string,
+                    "mv {1}, t0",
+                    "mv t0, {2}",
+                    // vse{n}.v v1, (t0)
+                    #inst_store_string,
+                    "mv t0, {0}",
+                    out(reg) _tmp_t0_saved,
+                    out(reg) tmp_bool_t0,
+                    in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
+                )
+            }
+            let tmp_uint_rv = unsafe { core::mem::transmute::<_, #uint_type>(tmp_rvv_vector_buf) };
+        }));
+        if self.show_asm {
+            let comment0 = inst_to_comment(&inst_div);
+            let comment1 = inst_to_comment(&inst_ne);
+            let comment2 = inst_to_comment(&inst_firstm2);
+            inner_tokens.extend(Some(quote! {
+                let _ = #comment0;
+                let _ = #comment1;
+                let _ = #comment2;
+            }));
+        }
         let ts = if is_checked {
             quote! {
                 if tmp_bool_t0 == 0 {
-                    let tmp_bool_t1: i64;
                     unsafe {
                         asm!(
+                            "mv {0}, t0",
                             // vdivu.vv v4, v1, v2
-                            ".byte {0}, {1}, {2}, {3}",
+                            #inst_div_string,
                             // vmsne.vv v4, v4, v3
-                            ".byte {4}, {5}, {6}, {7}",
-                            // vfirst.m t1, v4
-                            ".byte {8}, {9}, {10}, {11}",
-                            "mv {12}, t1",
-                            const #b0_div, const #b1_div, const #b2_div, const #b3_div,
-                            const #b0_ne, const #b1_ne, const #b2_ne, const #b3_ne,
-                            const #b0_firstm, const #b1_firstm, const #b2_firstm, const #b3_firstm,
-                            out(reg) tmp_bool_t1,
+                            #inst_ne_string,
+                            // vfirst.m t0, v4
+                            #inst_firstm2_string,
+                            "mv {1}, t0",
+                            "mv t0, {0}",
+                            out(reg) _tmp_t0_saved,
+                            out(reg) tmp_bool_t0,
                         )
                     }
-                    if tmp_bool_t1 == 0 {
+                    if tmp_bool_t0 == 0 {
                         None
                     } else {
                         Some(tmp_uint_rv)
@@ -997,23 +1147,22 @@ impl CodegenContext {
         } else {
             quote! {
                 if tmp_bool_t0 == 0 {
-                    let tmp_bool_t1: i64;
                     unsafe {
                         asm!(
+                            "mv {0}, t0",
                             // vdivu.vv v5, v1, v2
-                            ".byte {0}, {1}, {2}, {3}",
+                            #inst_div_string,
                             // vmsne.vv v4, v5, v3
-                            ".byte {4}, {5}, {6}, {7}",
-                            // vfirst.m t1, v4
-                            ".byte {8}, {9}, {10}, {11}",
-                            "mv {12}, t1",
-                            const #b0_div, const #b1_div, const #b2_div, const #b3_div,
-                            const #b0_ne, const #b1_ne, const #b2_ne, const #b3_ne,
-                            const #b0_firstm, const #b1_firstm, const #b2_firstm, const #b3_firstm,
-                            out(reg) tmp_bool_t1,
+                            #inst_ne_string,
+                            // vfirst.m t0, v4
+                            #inst_firstm2_string,
+                            "mv {1}, t0",
+                            "mv t0, {0}",
+                            out(reg) _tmp_t0_saved,
+                            out(reg) tmp_bool_t0,
                         )
                     }
-                    (tmp_uint_rv, tmp_bool_t1 == 0)
+                    (tmp_uint_rv, tmp_bool_t0 == 0)
                 } else {
                     (tmp_uint_rv, false)
                 }
@@ -1034,27 +1183,22 @@ impl CodegenContext {
     ) -> Result<(), anyhow::Error> {
         let vd = self
             .v_registers
-            .next_register()
+            .alloc()
             .ok_or_else(|| anyhow!("not enough V register for this expression"))?;
 
         let mut inner_tokens = TokenStream::new();
-        for inst in [
-            VInst::VmulVv(ivv),
-            VInst::VmsneVi(Ivi {
-                vd: VReg::from_u8(vd),
-                vs2: ivv.vd,
-                imm: Imm(0),
-                vm: false,
-            }),
-            VInst::VfirstM {
-                rd: XReg::T0,
-                vs2: VReg::from_u8(vd),
-                vm: false,
-            },
-        ] {
-            inst_codegen(&mut inner_tokens, inst, self.show_asm);
-        }
-
+        let inst_mul = VInst::VmulVv(ivv);
+        let inst_msne = VInst::VmsneVi(Ivi {
+            vd: VReg::from_u8(vd),
+            vs2: ivv.vd,
+            imm: Imm(0),
+            vm: false,
+        });
+        let inst_firstm1 = VInst::VfirstM {
+            rd: XReg::T0,
+            vs2: VReg::from_u8(vd),
+            vm: false,
+        };
         let inst_div = VInst::VdivuVv(Ivv {
             vd: VReg::from_u8(vd),
             vs2: ivv.vd,
@@ -1067,59 +1211,70 @@ impl CodegenContext {
             vs1: ivv.vs1,
             vm: false,
         });
-        let inst_firstm = VInst::VfirstM {
-            rd: XReg::T1,
+        let inst_firstm2 = VInst::VfirstM {
+            rd: XReg::T0,
             vs2: VReg::from_u8(vd),
             vm: false,
         };
         let inst_store = VInst::VseV {
             width: bit_length,
             vs3: ivv.vd,
-            rs1: XReg::T2,
+            rs1: XReg::T0,
             vm: false,
         };
-        let [b0_div, b1_div, b2_div, b3_div] = inst_div.encode_bytes();
-        let [b0_ne, b1_ne, b2_ne, b3_ne] = inst_ne.encode_bytes();
-        let [b0_firstm, b1_firstm, b2_firstm, b3_firstm] = inst_firstm.encode_bytes();
-        let [b0_store, b1_store, b2_store, b3_store] = inst_store.encode_bytes();
         let uint_type = quote::format_ident!("U{}", bit_length);
         let buf_length = bit_length as usize / 8;
+        let inst_mul_string = inst_to_string(&inst_mul);
+        let inst_msne_string = inst_to_string(&inst_msne);
+        let inst_firstm1_string = inst_to_string(&inst_firstm1);
+        let inst_div_string = inst_to_string(&inst_div);
+        let inst_ne_string = inst_to_string(&inst_ne);
+        let inst_firstm2_string = inst_to_string(&inst_firstm2);
+        let inst_store_string = inst_to_string(&inst_store);
         inner_tokens.extend(Some(quote! {
-            let tmp_bool_t0: i64;
-            let mut tmp_bool_t1: i64 = -1;
+            let mut _tmp_t0_saved: i64;
+            let mut tmp_bool_t0: i64;
             unsafe {
                 asm!(
                     "mv {0}, t0",
+                    #inst_mul_string,
+                    #inst_msne_string,
+                    #inst_firstm1_string,
+                    "mv {1}, t0",
+                    "mv t0, {0}",
+                    out(reg) _tmp_t0_saved,
                     out(reg) tmp_bool_t0,
                 )
             }
             if tmp_bool_t0 == 0 {
                 unsafe {
                     asm!(
-                        ".byte {0}, {1}, {2}, {3}",
-                        ".byte {4}, {5}, {6}, {7}",
-                        ".byte {8}, {9}, {10}, {11}",
-                        "mv {12}, t1",
-                        const #b0_div, const #b1_div, const #b2_div, const #b3_div,
-                        const #b0_ne, const #b1_ne, const #b2_ne, const #b3_ne,
-                        const #b0_firstm, const #b1_firstm, const #b2_firstm, const #b3_firstm,
-                        out(reg) tmp_bool_t1,
+                        "mv {0}, t0",
+                        #inst_div_string,
+                        #inst_ne_string,
+                        #inst_firstm2_string,
+                        "mv {1}, t0",
+                        "mv t0, {0}",
+                        out(reg) _tmp_t0_saved,
+                        out(reg) tmp_bool_t0,
                     )
                 }
             }
-            if tmp_bool_t1 == 0 {
+            if tmp_bool_t0 == 0 {
                 #uint_type::max_value()
             } else {
-                let mut tmp_rvv_vector_buf = [0u8; #buf_length];
+                let mut tmp_rvv_vector_buf: core::mem::MaybeUninit<[u8; #buf_length]> = core::mem::MaybeUninit::uninit();
                 unsafe {
                     asm!(
-                        "mv t2, {0}",
-                        ".byte {1}, {2}, {3}, {4}",
+                        "mv {0}, t0",
+                        "mv t0, {1}",
+                        #inst_store_string,
+                        "mv t0, {0}",
+                        out(reg) _tmp_t0_saved,
                         in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                        const #b0_store, const #b1_store, const #b2_store, const #b3_store,
                     )
                 }
-                unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) }
+                unsafe { core::mem::transmute::<_, #uint_type>(tmp_rvv_vector_buf) }
             }
         }));
         token::Brace::default().surround(tokens, |inner| {
@@ -1129,106 +1284,212 @@ impl CodegenContext {
     }
 }
 
-fn inst_codegen(tokens: &mut TokenStream, inst: VInst, show_asm: bool) {
-    let [b0, b1, b2, b3] = inst.encode_bytes();
+fn vstore_codegen(tokens: &mut TokenStream, vreg: u8, bit_length: u16, show_asm: bool) {
+    let inst = VInst::VseV {
+        width: bit_length,
+        vs3: VReg::from_u8(vreg),
+        rs1: XReg::T0,
+        vm: false,
+    };
     if show_asm {
-        let comment = format!("{} - {}", inst, inst.encode_u32());
+        let comment = inst_to_comment(&inst);
         tokens.extend(Some(quote! {
             let _ = #comment;
         }));
     }
+    let uint_type = quote::format_ident!("U{}", bit_length);
+    let buf_length = bit_length as usize / 8;
+    let inst_string = inst_to_string(&inst);
+    tokens.extend(Some(quote! {
+        let _tmp_t0_saved: i64;
+        let mut tmp_rvv_vector_buf: core::mem::MaybeUninit<[u8; #buf_length]> = core::mem::MaybeUninit::uninit();
+        unsafe {
+            asm!(
+                "mv {0}, t0",
+                "mv t0, {1}",
+                // This should be vse{256, 512, 1024}
+                #inst_string,
+                "mv t0, {0}",
+                out(reg) _tmp_t0_saved,
+                in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
+            )
+        }
+        unsafe { core::mem::transmute::<_, #uint_type>(tmp_rvv_vector_buf) }
+    }));
+}
+
+fn inst_codegen(tokens: &mut TokenStream, inst: VInst, show_asm: bool) {
+    if show_asm {
+        let comment = inst_to_comment(&inst);
+        tokens.extend(Some(quote! {
+            let _ = #comment;
+        }));
+    }
+    let inst_string = inst_to_string(&inst);
     let ts = quote! {
         unsafe {
-            asm!(".byte {0}, {1}, {2}, {3}", const #b0, const #b1, const #b2, const #b3,)
+            asm!(#inst_string)
         }
     };
     tokens.extend(Some(ts));
 }
 
-fn overflowing_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16, show_asm: bool) {
-    let inst = VInst::VseV {
+fn overflowing_rv_codegen(
+    tokens: &mut TokenStream,
+    inst: VInst,
+    ivv: Ivv,
+    lt_vd: u8,
+    bit_length: u16,
+    show_asm: bool,
+) {
+    let inst_msltu = VInst::VmsltuVv(Ivv {
+        vd: VReg::from_u8(lt_vd),
+        vs2: ivv.vd,
+        vs1: ivv.vs1,
+        vm: false,
+    });
+    let inst_firstm = VInst::VfirstM {
+        rd: XReg::T0,
+        vs2: VReg::from_u8(lt_vd),
+        vm: false,
+    };
+    let inst_store = VInst::VseV {
         width: bit_length,
-        vs3: vreg,
-        rs1: XReg::T1,
+        vs3: ivv.vd,
+        rs1: XReg::T0,
         vm: false,
     };
     if show_asm {
-        let comment0 = "mv {tmp_bool_var}, t0";
-        let comment1 = "mv t1, {tmp_rvv_vector_buf}";
-        let comment2 = format!("{} - {}", inst, inst.encode_u32());
+        let comment0 = inst_to_comment(&inst);
+        let comment1 = inst_to_comment(&inst_msltu);
+        let comment2 = inst_to_comment(&inst_firstm);
+        let comment3 = inst_to_comment(&inst_store);
         tokens.extend(Some(quote! {
             let _ = #comment0;
             let _ = #comment1;
             let _ = #comment2;
+            let _ = #comment3;
         }));
     }
-    let [b0, b1, b2, b3] = inst.encode_bytes();
 
     let uint_type = quote::format_ident!("U{}", bit_length);
     let buf_length = bit_length as usize / 8;
+    let inst_string = inst_to_string(&inst);
+    let inst_msltu_string = inst_to_string(&inst_msltu);
+    let inst_firstm_string = inst_to_string(&inst_firstm);
+    let inst_store_string = inst_to_string(&inst_store);
     tokens.extend(Some(quote! {
-        let tmp_bool_var: i64;
-        let mut tmp_rvv_vector_buf = [0u8; #buf_length];
+        let _tmp_t0_saved: i64;
+        let tmp_bool_t0: i64;
+        let mut tmp_rvv_vector_buf: core::mem::MaybeUninit<[u8; #buf_length]> = core::mem::MaybeUninit::uninit();
         // t0: 0  (vms* success)
         // t0: -1 (not found)
         unsafe {
             asm!(
                 "mv {0}, t0",
-                "mv t1, {1}",
-                ".byte {2}, {3}, {4}, {5}",
-                out(reg) tmp_bool_var,
+                #inst_string,
+                #inst_msltu_string,
+                #inst_firstm_string,
+                "mv {1}, t0",
+                "mv t0, {2}",
+                #inst_store_string,
+                "mv t0, {0}",
+                out(reg) _tmp_t0_saved,
+                out(reg) tmp_bool_t0,
                 in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                const #b0, const #b1, const #b2, const #b3,
             )
         }
-        (unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) }, tmp_bool_var == 0)
+        (
+            unsafe { core::mem::transmute::<_, #uint_type>(tmp_rvv_vector_buf) },
+            tmp_bool_t0 == 0
+        )
     }));
 }
 
-fn checked_rv_codegen(tokens: &mut TokenStream, vreg: VReg, bit_length: u16, show_asm: bool) {
-    let inst = VInst::VseV {
+fn checked_rv_codegen(
+    tokens: &mut TokenStream,
+    inst: VInst,
+    ivv: Ivv,
+    lt_vd: u8,
+    bit_length: u16,
+    show_asm: bool,
+) {
+    let inst_msltu = VInst::VmsltuVv(Ivv {
+        vd: VReg::from_u8(lt_vd),
+        vs2: ivv.vd,
+        vs1: ivv.vs1,
+        vm: false,
+    });
+    let inst_firstm = VInst::VfirstM {
+        rd: XReg::T0,
+        vs2: VReg::from_u8(lt_vd),
+        vm: false,
+    };
+    let inst_store = VInst::VseV {
         width: bit_length,
-        vs3: vreg,
-        rs1: XReg::T1,
+        vs3: ivv.vd,
+        rs1: XReg::T0,
         vm: false,
     };
     if show_asm {
-        let comment0 = "mv {tmp_bool_var}, t0";
-        let comment1 = "mv t1, {tmp_rvv_vector_buf}";
-        let comment2 = format!("{} - {}", inst, inst.encode_u32());
+        let comment0 = inst_to_comment(&inst);
+        let comment1 = inst_to_comment(&inst_msltu);
+        let comment2 = inst_to_comment(&inst_firstm);
+        let comment3 = inst_to_comment(&inst_store);
         tokens.extend(Some(quote! {
             let _ = #comment0;
             let _ = #comment1;
             let _ = #comment2;
+            let _ = #comment3;
         }));
     }
-    let [b0, b1, b2, b3] = inst.encode_bytes();
 
     let uint_type = quote::format_ident!("U{}", bit_length);
     let buf_length = bit_length as usize / 8;
+    let inst_string = inst_to_string(&inst);
+    let inst_msltu_string = inst_to_string(&inst_msltu);
+    let inst_firstm_string = inst_to_string(&inst_firstm);
+    let inst_store_string = inst_to_string(&inst_store);
     tokens.extend(Some(quote! {
-        let tmp_bool_var: i64;
+        let mut _tmp_t0_saved: i64;
+        let tmp_bool_t0: i64;
         // t0: 0  (vms* success)
         // t0: -1 (not found)
         unsafe {
             asm!(
                 "mv {0}, t0",
-                out(reg) tmp_bool_var,
+                #inst_string,
+                #inst_msltu_string,
+                #inst_firstm_string,
+                "mv {1}, t0",
+                "mv t0, {0}",
+                out(reg) _tmp_t0_saved,
+                out(reg) tmp_bool_t0,
             )
         }
-        if tmp_bool_var == 0 {
+        if tmp_bool_t0 == 0 {
             None
         } else {
-            let mut tmp_rvv_vector_buf = [0u8; #buf_length];
+            let mut tmp_rvv_vector_buf: core::mem::MaybeUninit<[u8; #buf_length]> = core::mem::MaybeUninit::uninit();
             unsafe {
                 asm!(
-                    "mv t1, {0}",
-                    ".byte {1}, {2}, {3}, {4}",
+                    "mv {0}, t0",
+                    "mv t0, {1}",
+                    #inst_store_string,
+                    "mv t0, {0}",
+                    out(reg) _tmp_t0_saved,
                     in(reg) tmp_rvv_vector_buf.as_mut_ptr(),
-                    const #b0, const #b1, const #b2, const #b3,
                 )
             }
-            Some(unsafe { core::mem::transmute::<[u8; #buf_length], #uint_type>(tmp_rvv_vector_buf) })
+            Some(unsafe { core::mem::transmute::<_, #uint_type>(tmp_rvv_vector_buf) })
         }
     }));
+}
+
+fn inst_to_string(inst: &VInst) -> String {
+    let [b0, b1, b2, b3] = inst.encode_bytes();
+    format!(".byte {:#04x}, {:#04x}, {:#04x}, {:#04x}", b0, b1, b2, b3)
+}
+fn inst_to_comment(inst: &VInst) -> String {
+    format!("{} - {}", inst, inst.encode_u32())
 }

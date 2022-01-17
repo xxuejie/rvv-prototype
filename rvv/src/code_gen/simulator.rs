@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 
+use super::RegInfo;
 use super::{CodegenContext, OpCategory, ToTokenStream};
 use crate::ast::{Expression, TypedExpression};
 use crate::SpannedError;
@@ -12,16 +13,29 @@ impl CodegenContext {
         expr: &TypedExpression,
         top_level: bool,
         extra_bind_id: Option<usize>,
+        _exists_vd: Option<u8>,
         mut bit_length: u16,
     ) -> Result<TokenStream, SpannedError> {
         let (left, op, right, is_assign) = match &expr.expr.0 {
+            Expression::Assign { left, right, .. } => {
+                let mut tokens = TokenStream::new();
+                left.to_tokens(&mut tokens, self)?;
+                syn::token::Eq::default().to_tokens(&mut tokens);
+                right.to_tokens(&mut tokens, self)?;
+                return Ok(tokens)
+            }
             Expression::AssignOp { left, op, right } => (left, op, right, true),
             Expression::Binary { left, op, right } => (left, op, right, false),
+            Expression::Path(path) => {
+                let mut tokens = TokenStream::new();
+                path.to_tokens(&mut tokens);
+                return Ok(tokens);
+            }
             Expression::MethodCall { receiver, method, args, .. } => {
                 return self.default_method_call_codegen(receiver, method, args);
             }
             Expression::Paren { expr: sub_expr, .. } => {
-                let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), bit_length)?;
+                let ts = self.gen_tokens(&*sub_expr, top_level, Some(expr.id), None, bit_length)?;
                 return Ok(quote! {(#ts)});
             }
             _  => return Err((expr.expr.1, anyhow!("invalid expression, inner expression must be simple variable name or binary op"))),
@@ -60,21 +74,27 @@ impl CodegenContext {
         for typed_expr in [left, right] {
             if let Some(var_ident) = typed_expr.expr.0.var_ident() {
                 if let Some(vreg) = self.var_regs.get(var_ident) {
-                    self.expr_regs.insert(typed_expr.id, (*vreg, bit_length));
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(*vreg, bit_length, Some(var_ident.clone())),
+                    );
                 } else {
-                    let vreg = self.v_registers.next_register().ok_or_else(|| {
+                    let vreg = self.v_registers.alloc().ok_or_else(|| {
                         (
                             typed_expr.expr.1,
                             anyhow!("not enough V register for this expression"),
                         )
                     })?;
                     self.var_regs.insert(var_ident.clone(), vreg);
-                    self.expr_regs.insert(typed_expr.id, (vreg, bit_length));
+                    self.expr_regs.insert(
+                        typed_expr.id,
+                        RegInfo::new(vreg, bit_length, Some(var_ident.clone())),
+                    );
                 }
                 self.expr_tokens
                     .insert(typed_expr.id, (quote! {#var_ident}, bit_length));
             } else {
-                let _ts = self.gen_tokens(typed_expr, false, None, bit_length)?;
+                let _ts = self.gen_tokens(typed_expr, false, None, None, bit_length)?;
             }
         }
 
@@ -93,13 +113,14 @@ impl CodegenContext {
         }
         // FIXME: handle OpCategory::Bool
         if let OpCategory::Binary = op_category {
-            let dvreg = self.v_registers.next_register().ok_or_else(|| {
+            let dvreg = self.v_registers.alloc().ok_or_else(|| {
                 (
                     expr.expr.1,
                     anyhow!("not enough V register for this expression"),
                 )
             })?;
-            self.expr_regs.insert(expr.id, (dvreg, bit_len1));
+            self.expr_regs
+                .insert(expr.id, RegInfo::new(dvreg, bit_len1, None));
         }
 
         // FIXME:
@@ -277,8 +298,8 @@ impl CodegenContext {
         self.expr_tokens.insert(expr.id, (tokens.clone(), bit_len1));
         // Handle `Expression::Paren(expr)`, bind current expr register to parent expr.
         if let Some(extra_expr_id) = extra_bind_id {
-            if let Some((dvreg, bit_len)) = self.expr_regs.get(&expr.id).cloned() {
-                self.expr_regs.insert(extra_expr_id, (dvreg, bit_len));
+            if let Some(info) = self.expr_regs.get(&expr.id).cloned() {
+                self.expr_regs.insert(extra_expr_id, info);
             }
             let ts_inner = tokens.clone();
             let ts = quote! {

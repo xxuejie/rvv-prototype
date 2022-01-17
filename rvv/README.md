@@ -3,7 +3,7 @@
 
 This is a library to help CKB contract developer to write big uint and integer vector calculation code in a subset of Rust, and it automaticly translate the code to RISC-V "V" Vector Extension (we call it RVV later) assembly code by [asm!][inline-asm] macro.
 
-The translation is implemented through a [proc-macro][?] called `rvv_vector`, and the proc-macro can only be used with bare function type (`fn(usize) -> bool`). Currently `rvv_vector` recognize 3 special uint types by it's name and generate RVV asm code them, the special uint types are:
+The translation is implemented through a [proc-macro][proc-macro] called `rvv_vector`, and the proc-macro can only be used with bare function type (`fn(usize) -> bool`). Currently `rvv_vector` recognize 3 special uint types by it's name and generate RVV asm code for them, the special uint types are:
 
  - U256 (unsigned 256-bit integer)
  - U512 (unsigned 512-bit integer)
@@ -61,7 +61,7 @@ fn simple_mixed_ops(mut a: U256, b: U256, c: U256) -> U256 {
 
 If write above code in pure asm code, will be like following pseudo-code:
 
-```assembly
+```
 ; Set AVL to 1
 li t0, 1
 ; Config vl and vtype 
@@ -259,7 +259,7 @@ if t0 == 0 {
 Translated to:
 ```
 vmul.vv v1, v2, v3
-vmsne.vi v4 v1, 0
+vmsne.vi v4 v2, 0
 vfirst.m t0, v4
 if t0 == 0 {
     vdivu.vv v4, v1, v2
@@ -302,11 +302,20 @@ if t0 == 0 {
 
 Translated to:
 ```
-let (value, overflow) = self.overflowing_mul(other);
-if overflow {
-    None
+vmul.vv v1, v2, v3
+vmsne.vi v4 v2, 0
+vfirst.m t0, v4
+if t0 == 0 {
+    vdivu.vv v4, v1, v2
+    vmsne.vv v4, v4, v3
+    vfirst.m t1, v4
+    if t1 == 0 {
+        None
+    } else {
+        Some(v1)
+    }
 } else {
-    Some(value)
+    Some(v1)
 }
 ```
 
@@ -328,7 +337,14 @@ if t0 == 0 {
 
 Translated to:
 ```
-// Same as checked_div()
+vmseq.vi v4, v2, 0  # (v2 == vs1)
+vfirst.m t0, v4
+if t0 == 0 {
+    None
+} else {
+    vremu.vv v1, v2, v3
+    Some(v1)
+}
 ```
 
 ### Call special uint methods (`saturating_{op}`)
@@ -381,12 +397,11 @@ cargo expand --lib cases::op_add
 It will output following code:
 ```rust
 fn op_add(a: U256, b: U256) -> U256 {
-    let _ = "li t0, 1";
-    let _ = "243462231 - vsetvl zero, t0, e256, m1, ta, ma";
+    let _ = "vsetvl zero, t0, e256, m1, ta, ma - 243462231";
     unsafe {asm!("li t0, 1\n.byte {0}, {1}, {2}, {3}", const 87u8, const 240u8, const 130u8, const 14u8)}
-    let _ = "268619783 - vle256.v v0, (t0)";
+    let _ = "vle256.v v0, (t0) - 268619783";
     unsafe {asm!("mv t0, {0}\n.byte {1}, {2}, {3}, {4}", in (reg) a.as_ref().as_ptr(), const 7u8, const 208u8, const 2u8, const 16u8)}
-    let _ = "268619911 - vle256.v v1, (t0)";
+    let _ = "vle256.v v1, (t0) - 268619911";
     unsafe {asm!("mv t0, {0}\n.byte {1}, {2}, {3}, {4}", in (reg) b.as_ref().as_ptr(), const 135u8, const 208u8, const 2u8, const 16u8)}
     {
         let _ = "vadd.vv v2, v0, v1 - 33111";
@@ -399,6 +414,7 @@ fn op_add(a: U256, b: U256) -> U256 {
 }
 ```
 
+[proc-macro]: https://doc.rust-lang.org/reference/procedural-macros.html
 [inline-asm]: https://rust-lang.github.io/rfcs/2873-inline-asm.html
 [cargo-expand]: https://github.com/dtolnay/cargo-expand
 [vadd-vv]: https://github.com/riscv-software-src/riscv-isa-sim/tree/master/riscv/insns/vadd_vv.h
