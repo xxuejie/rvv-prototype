@@ -4,7 +4,6 @@ extern crate alloc;
 use crate::signed_integer::SignedInteger;
 use alloc::rc::Rc;
 use core::cell::RefCell;
-use core::mem;
 use core::ops::{Add, Mul, Sub};
 use rvv::rvv_vector;
 use rvv_asm::rvv_asm;
@@ -133,7 +132,7 @@ impl Mont {
         if cfg!(feature = "use_rvv_vector") {
             mont_to_mont(self.n, self.r, x)
         } else if cfg!(feature = "use_rvv_asm") {
-            mont_to_mont_asm(self.n, self.r, x)
+            mont_to_mont_asm(&[self.n][..], &[self.r][..], &[x][..])[0]
         } else {
             assert!(self.init);
             let x2: U512 = x.into();
@@ -145,7 +144,13 @@ impl Mont {
         if cfg!(feature = "use_rvv_vector") {
             mont_multi(self.np1, self.n, x, y, self.bits)
         } else if cfg!(feature = "use_rvv_asm") {
-            mont_multi_asm(self.np1, self.n, x, y, self.bits)
+            mont_multi_asm(
+                &[self.np1][..],
+                &[self.n][..],
+                &[x][..],
+                &[y][..],
+                self.bits,
+            )[0]
         } else {
             let xy = U512::from(x) * U512::from(y);
             self.reduce(xy)
@@ -183,7 +188,6 @@ impl Mont {
 
 use alloc::vec::Vec;
 
-#[inline(never)]
 pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec<U256> {
     assert!(np1.len() == n.len());
     assert!(n.len() == t.len());
@@ -192,9 +196,6 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
         return Vec::new();
     }
 
-    let mut _reg_t0: i64;
-    let mut _reg_t1: i64;
-    let mut _reg_t2: i64;
     let mut m_256: Vec<U256> = Vec::with_capacity(len);
     let t_256 = t.iter().cloned().map(U256::from).collect::<Vec<_>>();
     unsafe {
@@ -204,14 +205,12 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
             "mv {tmp2}, t2",
             // vset
             "mv t1, {len}",
-            "mv t2, {buf}",
             "1:",
-            "vsetvli t0, t1, e256, m4",
-            // t1 -= t0
-            "sub t1, t1, t0",
+            // t2 = vl
+            "vsetvli t2, t1, e256, m4",
 
             // load t0
-            "mv t0, {value_t0}",
+            "mv t0, {value_t}",
             "vle256.v v2, (t0)", // v2..v6
             // load np1
             "mv t0, {value_np1}",
@@ -219,27 +218,32 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
             // t0 * np1
             "vmul.vv v2, v2, v6",
             // store result to buffer
-            "vse256.v v2, (t2)",
+            "mv t0, {buf}",
+            "vse256.v v2, (t0)",
 
-            // delta = len - t1
-            "sub t0, {len}, t1",
-            // delta *= 32
-            "slli t0, t0, 5",
-            // t2 = buf + delta
-            "add t2, {buf}, t0",
+            // len -= vl;
+            "sub t1, t1, t2",
+            "slli t2, t2, 5",
+            // value_t += 32 * vl;
+            "add {value_t}, {value_t}, t2",
+            // value_np1 += 32 * vl;
+            "add {value_np1}, {value_np1}, t2",
+            // buf += 32 * vl;
+            "add {buf}, {buf}, t2",
+
             "bnez t1, 1b",
 
             "mv t0, {tmp0}",
             "mv t1, {tmp1}",
             "mv t2, {tmp2}",
-            tmp0 = out(reg) _reg_t0,
-            tmp1 = out(reg) _reg_t1,
-            tmp2 = out(reg) _reg_t2,
+            tmp0 = out(reg) _,
+            tmp1 = out(reg) _,
+            tmp2 = out(reg) _,
             len = in(reg) len,
             // low part of `t`, same as `% self.r`, avoid overflow
-            value_t0 = in(reg) t_256[0].as_ref().as_ptr(),
-            value_np1 = in(reg) np1[0].as_ref().as_ptr(),
-            buf = in(reg) m_256.as_mut_ptr(),
+            value_t = inout(reg) t_256[0].as_ref().as_ptr() => _,
+            value_np1 = inout(reg) np1[0].as_ref().as_ptr() => _,
+            buf = inout(reg) m_256.as_mut_ptr() => _,
         );
         m_256.set_len(len);
     };
@@ -253,11 +257,8 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
             "mv {tmp2}, t2",
             // vset
             "mv t1, {len}",
-            "mv t2, {buf}",
             "2:",
-            "vsetvli t0, t1, e512, m8",
-            // t1 -= t0
-            "sub t1, t1, t0",
+            "vsetvli t2, t1, e512, m8",
 
             // load t
             "mv t0, {value_t}",
@@ -281,105 +282,166 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
             // u = u - n
             "vsub.vv v2, v2, v18, v0.t",
             // store u
-            "vse512.v v2, (t2)",
+            "mv t0, {buf}",
+            "vse512.v v2, (t0)",
 
-            // delta = len - t1
-            "sub t0, {len}, t1",
-            // delta *= 32
-            "slli t0, t0, 5",
-            // t2 = buf + delta
-            "add t2, {buf}, t0",
+            // len -= vl;
+            "sub t1, t1, t2",
+            "slli t2, t2, 6",
+            // value_t += 64 * vl;
+            "add {value_t}, {value_t}, t2",
+            // value_m += 64 * vl;
+            "add {value_m}, {value_m}, t2",
+            // value_n += 64 * vl;
+            "add {value_n}, {value_n}, t2",
+            // buf += 64 * vl;
+            "add {buf}, {buf}, t2",
+
             "bnez t1, 2b",
 
             "mv t0, {tmp0}",
             "mv t1, {tmp1}",
             "mv t2, {tmp2}",
-            tmp0 = out(reg) _reg_t0,
-            tmp1 = out(reg) _reg_t1,
-            tmp2 = out(reg) _reg_t2,
+            tmp0 = out(reg) _,
+            tmp1 = out(reg) _,
+            tmp2 = out(reg) _,
             len = in(reg) len,
-            value_t = in(reg) t[0].as_ref().as_ptr(),
-            value_m = in(reg) m_512[0].as_ref().as_ptr(),
-            value_n = in(reg) n_512[0].as_ref().as_ptr(),
             bits = in(reg) bits,
-            buf = in(reg) result_512.as_mut_ptr(),
+            value_t = inout(reg) t[0].as_ref().as_ptr() => _,
+            value_m = inout(reg) m_512[0].as_ref().as_ptr() => _,
+            value_n = inout(reg) n_512[0].as_ref().as_ptr() => _,
+            buf = inout(reg) result_512.as_mut_ptr() => _,
         );
         result_512.set_len(len);
     };
     result_512.into_iter().map(U256::from).collect()
 }
-#[inline(never)]
-pub fn mont_to_mont_asm(n: U256, r: U512, x: U256) -> U256 {
-    let mut _reg_t0: i64;
-    let mut _tmp_buf512: mem::MaybeUninit<[u8; 64]> = mem::MaybeUninit::uninit();
-    let res_512 = unsafe {
+pub fn mont_to_mont_asm(n: &[U256], r: &[U512], x: &[U256]) -> Vec<U256> {
+    assert!(n.len() == r.len());
+    assert!(r.len() == x.len());
+    let len = n.len();
+    if len == 0 {
+        return Vec::new();
+    }
+    let n_512 = n.iter().cloned().map(U256::from).collect::<Vec<_>>();
+    let x_512 = x.iter().cloned().map(U256::from).collect::<Vec<_>>();
+    let mut res_512: Vec<U512> = Vec::with_capacity(len);
+    unsafe {
         rvv_asm!(
             "mv {tmp0}, t0",
-            "li t0, 1",
-            "vsetvli zero, t0, e512, m1",
+            "mv {tmp1}, t1",
+            "mv {tmp2}, t2",
+
+            "mv t1, {len}",
+            "1:",
+            "vsetvli t2, t1, e512, m8",
 
             // load x
             "mv t0, {value_x}",
-            "vle512.v v1, (t0)",
+            "vle512.v v2, (t0)", // v2..v10
             // load r
             "mv t0, {value_r}",
-            "vle512.v v2, (t0)",
+            "vle512.v v10, (t0)", // v10..v18
             // load n
             "mv t0, {value_n}",
-            "vle512.v v3, (t0)",
+            "vle512.v v18, (t0)", // v18..v26
 
             // x = x * r;
-            "vmul.vv v1, v1, v2",
+            "vmul.vv v2, v2, v10",
             // x = x % n;
-            "vremu.vv v1, v1, v3",
+            "vremu.vv v2, v2, v18",
             // store x
-            "mv t0, {buf_512}",
-            "vse512.v v1, (t0)",
+            "mv t0, {buf}",
+            "vse512.v v2, (t0)",
+
+            // len -= vl;
+            "sub t1, t1, t2",
+            "slli t2, t2, 6",
+            // value_x += 64 * vl;
+            "add {value_x}, {value_x}, t2",
+            // value_r += 64 * vl;
+            "add {value_r}, {value_r}, t2",
+            // value_n += 64 * vl;
+            "add {value_n}, {value_n}, t2",
+            // buf += 64 * vl;
+            "add {buf}, {buf}, t2",
+
+            "bnez t1, 1b",
+
             "mv t0, {tmp0}",
-            tmp0 = out(reg) _reg_t0,
-            value_x = in(reg) U512::from(x).as_ref().as_ptr(),
-            value_r = in(reg) r.as_ref().as_ptr(),
-            value_n = in(reg) U512::from(n).as_ref().as_ptr(),
-            buf_512 = in(reg) _tmp_buf512.as_mut_ptr(),
+            "mv t1, {tmp1}",
+            "mv t2, {tmp2}",
+            tmp0 = out(reg) _,
+            tmp1 = out(reg) _,
+            tmp2 = out(reg) _,
+            len = in(reg) len,
+            value_x = inout(reg) x_512[0].as_ref().as_ptr() => _,
+            value_r = inout(reg) r[0].as_ref().as_ptr() => _,
+            value_n = inout(reg) n_512[0].as_ref().as_ptr() => _,
+            buf = inout(reg) res_512.as_mut_ptr() => _,
         );
-        mem::transmute::<_, U512>(_tmp_buf512)
+        res_512.set_len(len);
     };
-    U256::from(res_512)
+    res_512.into_iter().map(U256::from).collect()
 }
-#[inline(never)]
-pub fn mont_multi_asm(np1: U256, n: U256, x: U256, y: U256, bits: usize) -> U256 {
-    let mut _reg_t0: i64;
-    let mut _tmp_buf512: mem::MaybeUninit<[u8; 64]> = mem::MaybeUninit::uninit();
-    let xy = unsafe {
+pub fn mont_multi_asm(np1: &[U256], n: &[U256], x: &[U256], y: &[U256], bits: usize) -> Vec<U256> {
+    assert_eq!(np1.len(), n.len());
+    assert_eq!(n.len(), x.len());
+    assert_eq!(x.len(), y.len());
+    let len = np1.len();
+    let x_512 = x.iter().cloned().map(U512::from).collect::<Vec<_>>();
+    let y_512 = y.iter().cloned().map(U512::from).collect::<Vec<_>>();
+    let mut xy: Vec<U512> = Vec::with_capacity(len);
+    unsafe {
         rvv_asm!(
             "mv {tmp0}, t0",
-            "li t0, 1",
-            "vsetvli zero, t0, e512, m1",
+            "mv {tmp1}, t1",
+            "mv {tmp2}, t2",
+
+            "mv t1, {len}",
+            "1:",
+            "vsetvli t2, t1, e512, m8",
 
             // load x
             "mv t0, {value_x}",
-            "vle512.v v1, (t0)",
+            "vle512.v v2, (t0)", // v2..v10
             // load y
             "mv t0, {value_y}",
-            "vle512.v v2, (t0)",
-
+            "vle512.v v10, (t0)", // v10..v18
             // xy = x * y;
-            "vmul.vv v1, v1, v2",
+            "vmul.vv v2, v2, v10",
             // store x
-            "mv t0, {buf_512}",
-            "vse512.v v1, (t0)",
+            "mv t0, {buf}",
+            "vse512.v v2, (t0)",
+
+            // len -= vl;
+            "sub t1, t1, t2",
+            "slli t2, t2, 6",
+            // value_x += 64 * vl;
+            "add {value_x}, {value_x}, t2",
+            // value_y += 64 * vl;
+            "add {value_y}, {value_y}, t2",
+            // buf += 64 * vl;
+            "add {buf}, {buf}, t2",
+
+            "bnez t1, 1b",
+
             "mv t0, {tmp0}",
-            tmp0 = out(reg) _reg_t0,
-            value_x = in(reg) U512::from(x).as_ref().as_ptr(),
-            value_y = in(reg) U512::from(y).as_ref().as_ptr(),
-            buf_512 = in(reg) _tmp_buf512.as_mut_ptr(),
+            "mv t1, {tmp1}",
+            "mv t2, {tmp2}",
+            tmp0 = out(reg) _,
+            tmp1 = out(reg) _,
+            tmp2 = out(reg) _,
+            len = in(reg) len,
+            value_x = inout(reg) x_512[0].as_ref().as_ptr() => _,
+            value_y = inout(reg) y_512[0].as_ref().as_ptr() => _,
+            buf = inout(reg) xy.as_mut_ptr() => _,
         );
-        mem::transmute::<_, U512>(_tmp_buf512)
+        xy.set_len(len);
     };
-    mont_reduce_asm(&[np1][..], &[n][..], &[xy][..], bits)[0]
+    mont_reduce_asm(np1, n, &xy, bits)
 }
 
-#[inline(never)]
 pub fn pow_asm(np1: U256, n: U256, x: U256, y: U256, bits: usize) -> U256 {
     let mut base = x;
     let one = U!(1);
@@ -396,10 +458,11 @@ pub fn pow_asm(np1: U256, n: U256, x: U256, y: U256, bits: usize) -> U256 {
                 res = base;
                 first_time = false;
             } else {
-                res = mont_multi_asm(np1, n, res, base, bits);
+                res = mont_multi_asm(&[np1][..], &[n][..], &[res][..], &[base][..], bits)[0];
             }
         }
-        base = mont_multi_asm(np1, n, base, base, bits); // at most self.bits(256 here) multiplications
+        // at most self.bits(256 here) multiplications
+        base = mont_multi_asm(&[np1][..], &[n][..], &[base][..], &[base][..], bits)[0];
     }
     res
 }
