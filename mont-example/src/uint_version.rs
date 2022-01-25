@@ -153,27 +153,31 @@ impl Mont {
     }
 
     pub fn pow(&self, x: U256, y: U256) -> U256 {
-        let mut base = x;
-        let one = U!(1);
-        let mut res = U!(0);
-        let mut first_time: bool = true;
+        if cfg!(feature = "use_rvv_asm") {
+            pow_asm(self.np1, self.n, x, y, self.bits)
+        } else {
+            let mut base = x;
+            let one = U!(1);
+            let mut res = U!(0);
+            let mut first_time: bool = true;
 
-        for index in 0..self.bits {
-            // at most self.bits(256 here) multiplications
-            if ((y >> index) & one) == one {
-                if first_time {
-                    // note:
-                    // `res = self.multi(1, base)` is not same
-                    // as res = base;
-                    res = base;
-                    first_time = false;
-                } else {
-                    res = self.multi(res, base);
+            for index in 0..self.bits {
+                // at most self.bits(256 here) multiplications
+                if ((y >> index) & one) == one {
+                    if first_time {
+                        // note:
+                        // `res = self.multi(1, base)` is not same
+                        // as res = base;
+                        res = base;
+                        first_time = false;
+                    } else {
+                        res = self.multi(res, base);
+                    }
                 }
+                base = self.multi(base, base); // at most self.bits(256 here) multiplications
             }
-            base = self.multi(base, base); // at most self.bits(256 here) multiplications
+            res
         }
-        res
     }
 }
 
@@ -183,22 +187,28 @@ use alloc::vec::Vec;
 pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec<U256> {
     assert!(np1.len() == n.len());
     assert!(n.len() == t.len());
-    // NOTE: noly support less than 32 items
     let len = np1.len();
-    assert!(len <= 32);
     if np1.len() == 0 {
         return Vec::new();
     }
 
     let mut _reg_t0: i64;
+    let mut _reg_t1: i64;
+    let mut _reg_t2: i64;
     let mut m_256: Vec<U256> = Vec::with_capacity(len);
     let t_256 = t.iter().cloned().map(U256::from).collect::<Vec<_>>();
     unsafe {
         rvv_asm!(
             "mv {tmp0}, t0",
+            "mv {tmp1}, t1",
+            "mv {tmp2}, t2",
             // vset
-            "mv t0, {len}",
-            "vsetvli zero, t0, e256, m4",
+            "mv t1, {len}",
+            "mv t2, {buf}",
+            "1:",
+            "vsetvli t0, t1, e256, m4",
+            // t1 -= t0
+            "sub t1, t1, t0",
 
             // load t0
             "mv t0, {value_t0}",
@@ -209,10 +219,22 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
             // t0 * np1
             "vmul.vv v2, v2, v6",
             // store result to buffer
-            "mv t0, {buf}",
-            "vse256.v v2, (t0)",
+            "vse256.v v2, (t2)",
+
+            // delta = len - t1
+            "sub t0, {len}, t1",
+            // delta *= 32
+            "slli t0, t0, 5",
+            // t2 = buf + delta
+            "add t2, {buf}, t0",
+            "bnez t1, 1b",
+
             "mv t0, {tmp0}",
+            "mv t1, {tmp1}",
+            "mv t2, {tmp2}",
             tmp0 = out(reg) _reg_t0,
+            tmp1 = out(reg) _reg_t1,
+            tmp2 = out(reg) _reg_t2,
             len = in(reg) len,
             // low part of `t`, same as `% self.r`, avoid overflow
             value_t0 = in(reg) t_256[0].as_ref().as_ptr(),
@@ -227,9 +249,15 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
     unsafe {
         rvv_asm!(
             "mv {tmp0}, t0",
+            "mv {tmp1}, t1",
+            "mv {tmp2}, t2",
             // vset
-            "mv t0, {len}",
-            "vsetvli zero, t0, e512, m8",
+            "mv t1, {len}",
+            "mv t2, {buf}",
+            "2:",
+            "vsetvli t0, t1, e512, m8",
+            // t1 -= t0
+            "sub t1, t1, t0",
 
             // load t
             "mv t0, {value_t}",
@@ -253,10 +281,22 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
             // u = u - n
             "vsub.vv v2, v2, v18, v0.t",
             // store u
-            "mv t0, {buf}",
-            "vse512.v v2, (t0)",
+            "vse512.v v2, (t2)",
+
+            // delta = len - t1
+            "sub t0, {len}, t1",
+            // delta *= 32
+            "slli t0, t0, 5",
+            // t2 = buf + delta
+            "add t2, {buf}, t0",
+            "bnez t1, 2b",
+
             "mv t0, {tmp0}",
+            "mv t1, {tmp1}",
+            "mv t2, {tmp2}",
             tmp0 = out(reg) _reg_t0,
+            tmp1 = out(reg) _reg_t1,
+            tmp2 = out(reg) _reg_t2,
             len = in(reg) len,
             value_t = in(reg) t[0].as_ref().as_ptr(),
             value_m = in(reg) m_512[0].as_ref().as_ptr(),
@@ -337,6 +377,31 @@ pub fn mont_multi_asm(np1: U256, n: U256, x: U256, y: U256, bits: usize) -> U256
         mem::transmute::<_, U512>(_tmp_buf512)
     };
     mont_reduce_asm(&[np1][..], &[n][..], &[xy][..], bits)[0]
+}
+
+#[inline(never)]
+pub fn pow_asm(np1: U256, n: U256, x: U256, y: U256, bits: usize) -> U256 {
+    let mut base = x;
+    let one = U!(1);
+    let mut res = U!(0);
+    let mut first_time: bool = true;
+
+    for index in 0..bits {
+        // at most self.bits(256 here) multiplications
+        if ((y >> index) & one) == one {
+            if first_time {
+                // note:
+                // `res = self.multi(1, base)` is not same
+                // as res = base;
+                res = base;
+                first_time = false;
+            } else {
+                res = mont_multi_asm(np1, n, res, base, bits);
+            }
+        }
+        base = mont_multi_asm(np1, n, base, base, bits); // at most self.bits(256 here) multiplications
+    }
+    res
 }
 
 // implemented by rvv_vector
