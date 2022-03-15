@@ -6,6 +6,7 @@ use alloc::rc::Rc;
 use core::cell::RefCell;
 use core::ops::{Add, Mul, Sub};
 use rvv::rvv_vector;
+use rvv_asm::rvv_asm;
 
 use rvv_simulator_runtime::Uint;
 
@@ -112,6 +113,8 @@ impl Mont {
     pub fn reduce(&self, t: U512) -> U256 {
         if cfg!(feature = "use_rvv_vector") {
             mont_reduce(self.np1, self.n, t, self.bits)
+        } else if cfg!(feature = "use_rvv_asm") {
+            mont_reduce_asm(&[self.np1][..], &[self.n][..], &[t][..], self.bits)[0]
         } else {
             assert!(self.init);
             let t0: U512 = U!(t).into(); // low part of `t`, same as `% self.r`, avoid overflow
@@ -128,6 +131,8 @@ impl Mont {
     pub fn to_mont(&self, x: U256) -> U256 {
         if cfg!(feature = "use_rvv_vector") {
             mont_to_mont(self.n, self.r, x)
+        } else if cfg!(feature = "use_rvv_asm") {
+            mont_to_mont_asm(&[self.n][..], &[self.r][..], &[x][..])[0]
         } else {
             assert!(self.init);
             let x2: U512 = x.into();
@@ -138,6 +143,14 @@ impl Mont {
     pub fn multi(&self, x: U256, y: U256) -> U256 {
         if cfg!(feature = "use_rvv_vector") {
             mont_multi(self.np1, self.n, x, y, self.bits)
+        } else if cfg!(feature = "use_rvv_asm") {
+            mont_multi_asm(
+                &[self.np1][..],
+                &[self.n][..],
+                &[x][..],
+                &[y][..],
+                self.bits,
+            )[0]
         } else {
             let xy = U512::from(x) * U512::from(y);
             self.reduce(xy)
@@ -169,14 +182,276 @@ impl Mont {
     }
 }
 
+use alloc::vec::Vec;
+
+#[inline(never)]
+pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec<U256> {
+    assert!(np1.len() == n.len());
+    assert!(n.len() == t.len());
+    let len = np1.len();
+    if np1.len() == 0 {
+        return Vec::new();
+    }
+
+    let mut m_256: Vec<U256> = Vec::with_capacity(len);
+    let t_256 = t.iter().cloned().map(U256::from).collect::<Vec<_>>();
+    unsafe {
+        rvv_asm!(
+            "mv {tmp0}, t0",
+            "mv {tmp1}, t1",
+            "mv {tmp2}, t2",
+            // vset
+            "mv t1, {len}",
+            "1:",
+            // t2 = vl
+            "vsetvli t2, t1, e256, m4",
+
+            // load t0
+            "mv t0, {value_t}",
+            "vle256.v v2, (t0)", // v2..v6
+            // load np1
+            "mv t0, {value_np1}",
+            "vle256.v v6, (t0)", // v6..v10
+            // t0 * np1
+            "vmul.vv v2, v2, v6",
+            // store result to buffer
+            "mv t0, {buf}",
+            "vse256.v v2, (t0)",
+
+            // len -= vl;
+            "sub t1, t1, t2",
+            "slli t2, t2, 5",
+            // value_t += 32 * vl;
+            "add {value_t}, {value_t}, t2",
+            // value_np1 += 32 * vl;
+            "add {value_np1}, {value_np1}, t2",
+            // buf += 32 * vl;
+            "add {buf}, {buf}, t2",
+
+            "bnez t1, 1b",
+
+            "mv t0, {tmp0}",
+            "mv t1, {tmp1}",
+            "mv t2, {tmp2}",
+            tmp0 = out(reg) _,
+            tmp1 = out(reg) _,
+            tmp2 = out(reg) _,
+            len = in(reg) len,
+            // low part of `t`, same as `% self.r`, avoid overflow
+            value_t = inout(reg) t_256.as_ptr() => _,
+            value_np1 = inout(reg) np1.as_ptr() => _,
+            buf = inout(reg) m_256.as_mut_ptr() => _,
+        );
+        m_256.set_len(len);
+    };
+    let m_512 = m_256.into_iter().map(U512::from).collect::<Vec<_>>();
+    let n_512 = n.iter().cloned().map(U512::from).collect::<Vec<_>>();
+    let mut result_512: Vec<U512> = Vec::with_capacity(len);
+    unsafe {
+        rvv_asm!(
+            "mv {tmp0}, t0",
+            "mv {tmp1}, t1",
+            "mv {tmp2}, t2",
+            // vset
+            "mv t1, {len}",
+            "2:",
+            "vsetvli t2, t1, e512, m8",
+
+            // load t
+            "mv t0, {value_t}",
+            "vle512.v v2, (t0)", // v2..v10
+            // load m
+            "mv t0, {value_m}",
+            "vle512.v v10, (t0)", // v10..v18
+            // load n
+            "mv t0, {value_n}",
+            "vle512.v v18, (t0)", // v18..v26
+            // m = m * n
+            "vmul.vv v10, v10, v18",
+            // t = t + m
+            "vadd.vv v2, v2, v10",
+            // load bits
+            "mv t0, {bits}",
+            // u = t >> bits
+            "vsrl.vx v2, v2, t0",
+            // if u >= n {}
+            "vmsleu.vv v0, v18, v2",
+            // u = u - n
+            "vsub.vv v2, v2, v18, v0.t",
+            // store u
+            "mv t0, {buf}",
+            "vse512.v v2, (t0)",
+
+            // len -= vl;
+            "sub t1, t1, t2",
+            "slli t2, t2, 6",
+            // value_t += 64 * vl;
+            "add {value_t}, {value_t}, t2",
+            // value_m += 64 * vl;
+            "add {value_m}, {value_m}, t2",
+            // value_n += 64 * vl;
+            "add {value_n}, {value_n}, t2",
+            // buf += 64 * vl;
+            "add {buf}, {buf}, t2",
+
+            "bnez t1, 2b",
+
+            "mv t0, {tmp0}",
+            "mv t1, {tmp1}",
+            "mv t2, {tmp2}",
+            tmp0 = out(reg) _,
+            tmp1 = out(reg) _,
+            tmp2 = out(reg) _,
+            len = in(reg) len,
+            bits = in(reg) bits,
+            value_t = inout(reg) t.as_ptr() => _,
+            value_m = inout(reg) m_512.as_ptr() => _,
+            value_n = inout(reg) n_512.as_ptr() => _,
+            buf = inout(reg) result_512.as_mut_ptr() => _,
+        );
+        result_512.set_len(len);
+    };
+    result_512.into_iter().map(U256::from).collect()
+}
+#[inline(never)]
+pub fn mont_to_mont_asm(n: &[U256], r: &[U512], x: &[U256]) -> Vec<U256> {
+    assert!(n.len() == r.len());
+    assert!(r.len() == x.len());
+    let len = n.len();
+    if len == 0 {
+        return Vec::new();
+    }
+    let n_512 = n.iter().cloned().map(U256::from).collect::<Vec<_>>();
+    let x_512 = x.iter().cloned().map(U256::from).collect::<Vec<_>>();
+    let mut res_512: Vec<U512> = Vec::with_capacity(len);
+    unsafe {
+        rvv_asm!(
+            "mv {tmp0}, t0",
+            "mv {tmp1}, t1",
+            "mv {tmp2}, t2",
+
+            "mv t1, {len}",
+            "1:",
+            "vsetvli t2, t1, e512, m8",
+
+            // load x
+            "mv t0, {value_x}",
+            "vle512.v v2, (t0)", // v2..v10
+            // load r
+            "mv t0, {value_r}",
+            "vle512.v v10, (t0)", // v10..v18
+            // load n
+            "mv t0, {value_n}",
+            "vle512.v v18, (t0)", // v18..v26
+
+            // x = x * r;
+            "vmul.vv v2, v2, v10",
+            // x = x % n;
+            "vremu.vv v2, v2, v18",
+            // store x
+            "mv t0, {buf}",
+            "vse512.v v2, (t0)",
+
+            // len -= vl;
+            "sub t1, t1, t2",
+            "slli t2, t2, 6",
+            // value_x += 64 * vl;
+            "add {value_x}, {value_x}, t2",
+            // value_r += 64 * vl;
+            "add {value_r}, {value_r}, t2",
+            // value_n += 64 * vl;
+            "add {value_n}, {value_n}, t2",
+            // buf += 64 * vl;
+            "add {buf}, {buf}, t2",
+
+            "bnez t1, 1b",
+
+            "mv t0, {tmp0}",
+            "mv t1, {tmp1}",
+            "mv t2, {tmp2}",
+            tmp0 = out(reg) _,
+            tmp1 = out(reg) _,
+            tmp2 = out(reg) _,
+            len = in(reg) len,
+            value_x = inout(reg) x_512.as_ptr() => _,
+            value_r = inout(reg) r.as_ptr() => _,
+            value_n = inout(reg) n_512.as_ptr() => _,
+            buf = inout(reg) res_512.as_mut_ptr() => _,
+        );
+        res_512.set_len(len);
+    };
+    res_512.into_iter().map(U256::from).collect()
+}
+#[inline(never)]
+pub fn mont_multi_asm(np1: &[U256], n: &[U256], x: &[U256], y: &[U256], bits: usize) -> Vec<U256> {
+    assert_eq!(np1.len(), n.len());
+    assert_eq!(n.len(), x.len());
+    assert_eq!(x.len(), y.len());
+    let len = np1.len();
+    if len == 0 {
+        return Vec::new();
+    }
+    let x_512 = x.iter().cloned().map(U512::from).collect::<Vec<_>>();
+    let y_512 = y.iter().cloned().map(U512::from).collect::<Vec<_>>();
+    let mut xy: Vec<U512> = Vec::with_capacity(len);
+    unsafe {
+        rvv_asm!(
+            "mv {tmp0}, t0",
+            "mv {tmp1}, t1",
+            "mv {tmp2}, t2",
+
+            "mv t1, {len}",
+            "1:",
+            "vsetvli t2, t1, e512, m8",
+
+            // load x
+            "mv t0, {value_x}",
+            "vle512.v v2, (t0)", // v2..v10
+            // load y
+            "mv t0, {value_y}",
+            "vle512.v v10, (t0)", // v10..v18
+            // xy = x * y;
+            "vmul.vv v2, v2, v10",
+            // store x
+            "mv t0, {buf}",
+            "vse512.v v2, (t0)",
+
+            // len -= vl;
+            "sub t1, t1, t2",
+            "slli t2, t2, 6",
+            // value_x += 64 * vl;
+            "add {value_x}, {value_x}, t2",
+            // value_y += 64 * vl;
+            "add {value_y}, {value_y}, t2",
+            // buf += 64 * vl;
+            "add {buf}, {buf}, t2",
+
+            "bnez t1, 1b",
+
+            "mv t0, {tmp0}",
+            "mv t1, {tmp1}",
+            "mv t2, {tmp2}",
+            tmp0 = out(reg) _,
+            tmp1 = out(reg) _,
+            tmp2 = out(reg) _,
+            len = in(reg) len,
+            value_x = inout(reg) x_512.as_ptr() => _,
+            value_y = inout(reg) y_512.as_ptr() => _,
+            buf = inout(reg) xy.as_mut_ptr() => _,
+        );
+        xy.set_len(len);
+    };
+    mont_reduce_asm(np1, n, &xy, bits)
+}
 // implemented by rvv_vector
 #[rvv_vector]
 pub fn mont_reduce(np1: U256, n: U256, t: U512, bits: usize) -> U256 {
     let t0: U512 = U256::from(t).into(); // low part of `t`, same as `% self.r`, avoid overflow
     let np1_512: U512 = U512::from(np1);
-    let m_512: U512 = U256::from(t0 * np1_512).into(); // `% self.r`
     let n_512: U512 = U512::from(n);
     let bits_512: U512 = U512::from(bits);
+    let m_256: U256 = U256::from(t0 * np1_512);
+    let m_512: U512 = m_256.into(); // `% self.r`
     let u: U512 = (t + m_512 * n_512) >> bits_512; // `/ self.r`
     if u >= n_512 {
         U256::from(u - n_512)

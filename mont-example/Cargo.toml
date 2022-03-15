@@ -12,6 +12,7 @@ lto = "fat"
 [dependencies]
 rvv = { path = "../rvv" }
 ckb-std = "0.9.0"
+rvv-asm = "0.1.11"
 rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
 
 [[bin]]
@@ -21,8 +22,13 @@ required-features = ["simulator", "use_rvv_vector"]
 
 [[bin]]
 path = "src/main.rs"
-name = "mont-example-rvv-asm"
+name = "mont-example-rvv-vector"
 required-features = ["use_rvv_vector"]
+
+[[bin]]
+path = "src/main.rs"
+name = "mont-example-rvv-asm"
+required-features = ["use_rvv_asm"]
 
 [[bin]]
 path = "src/main.rs"
@@ -33,4 +39,5 @@ required-features = []
 [features]
 default = []
 use_rvv_vector = []
+use_rvv_asm = []
 simulator = ["rvv/simulator"]

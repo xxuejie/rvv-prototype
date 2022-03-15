@@ -223,8 +223,12 @@ pub fn test() {
 pub fn program_entry() -> i8 {
     if cfg!(feature = "use_rvv_vector") {
         debug(format!("feature = use_rvv_vector"));
+    } else if cfg!(feature = "use_rvv_asm") {
+        debug(format!("feature = use_rvv_asm"));
     } else {
-        debug(format!("feature != use_rvv_vector"));
+        debug(format!(
+            "feature != use_rvv_vector && feature != use_rvv_asm"
+        ));
     }
     if cfg!(feature = "simulator") {
         debug(format!("feature = simulator"));
