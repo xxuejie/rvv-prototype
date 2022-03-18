@@ -291,7 +291,7 @@ impl U256 {
     /// multiplication method.
     pub fn mul(&mut self, other: &U256, modulo: &U256, inv: u128) {
         // original one
-        if cfg!(feature = "use_rvv_vector") {
+        if cfg!(any(feature = "use_rvv_vector", feature = "use_rvv_asm")) {
             let inv_high = if inv == 0x9ede7d651eca6ac987d20782e4866389 {
                 0xf57a22b791888c6bd8afcbd01833da80u128
             } else if inv == 0x6586864b4c6911b3c2e1f593efffffff {

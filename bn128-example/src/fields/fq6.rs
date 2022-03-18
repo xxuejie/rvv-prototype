@@ -1,6 +1,8 @@
 use crate::fields::{const_fq, FieldElement, Fq, Fq2};
 use core::ops::{Add, Mul, Neg, Sub};
 
+use super::fq2::batch_mul3;
+
 fn frobenius_coeffs_c1(n: usize) -> Fq2 {
     match n % 6 {
         0 => Fq2::one(),
@@ -186,14 +188,35 @@ impl Mul for Fq6 {
     type Output = Fq6;
 
     fn mul(self, other: Fq6) -> Fq6 {
-        let a_a = self.c0 * other.c0;
-        let b_b = self.c1 * other.c1;
-        let c_c = self.c2 * other.c2;
+        if cfg!(feature = "use_rvv_asm") {
+            let (a_a, b_b, c_c) =
+                batch_mul3(self.c0, self.c1, self.c2, other.c0, other.c1, other.c2);
+            let (x, y, z) = batch_mul3(
+                self.c1 + self.c2,
+                self.c0 + self.c1,
+                self.c0 + self.c2,
+                other.c1 + other.c2,
+                other.c0 + other.c1,
+                other.c0 + other.c2,
+            );
 
-        Fq6 {
-            c0: ((self.c1 + self.c2) * (other.c1 + other.c2) - b_b - c_c).mul_by_nonresidue() + a_a,
-            c1: (self.c0 + self.c1) * (other.c0 + other.c1) - a_a - b_b + c_c.mul_by_nonresidue(),
-            c2: (self.c0 + self.c2) * (other.c0 + other.c2) - a_a + b_b - c_c,
+            Fq6 {
+                c0: (x - b_b - c_c).mul_by_nonresidue() + a_a,
+                c1: y - a_a - b_b + c_c.mul_by_nonresidue(),
+                c2: z - a_a + b_b - c_c,
+            }
+        } else {
+            let a_a = self.c0 * other.c0;
+            let b_b = self.c1 * other.c1;
+            let c_c = self.c2 * other.c2;
+
+            Fq6 {
+                c0: ((self.c1 + self.c2) * (other.c1 + other.c2) - b_b - c_c).mul_by_nonresidue()
+                    + a_a,
+                c1: (self.c0 + self.c1) * (other.c0 + other.c1) - a_a - b_b
+                    + c_c.mul_by_nonresidue(),
+                c2: (self.c0 + self.c2) * (other.c0 + other.c2) - a_a + b_b - c_c,
+            }
         }
     }
 }

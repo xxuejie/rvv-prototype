@@ -31,9 +31,21 @@ fn internal_main() {
     } else {
         debug(format!("feature != simulator"))
     }
-    debug(format!("start test_alt_bn128_pairing ..."));
-    alt_bn128_example::ethereum::ut::test_alt_bn128_pairing();
-    debug(format!("test_alt_bn128_pairing pass"));
+    if cfg!(feature = "use_rvv_asm") {
+        debug(format!("feature = use_rvv_asm"));
+    } else {
+        debug(format!("feature != use_rvv_asm"));
+    }
+
+    if cfg!(feature = "run_all_cases") {
+        debug(format!("start test_alt_bn128_pairing ..."));
+        alt_bn128_example::ethereum::ut::test_alt_bn128_pairing();
+        debug(format!("test_alt_bn128_pairing pass"));
+    } else {
+        debug(format!("start test_alt_bn128_pairing_once ..."));
+        alt_bn128_example::ethereum::ut::test_alt_bn128_pairing_once();
+        debug(format!("test_alt_bn128_pairing_once pass"));
+    }
 }
 
 pub fn program_entry(argc: u64, argv: *const *const u8) -> i8 {

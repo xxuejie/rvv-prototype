@@ -1,6 +1,11 @@
+extern crate alloc;
+
 use crate::arith::{U256, U512};
 use crate::fields::{const_fq, FieldElement, Fq};
+use core::mem;
 use core::ops::{Add, Mul, Neg, Sub};
+
+use super::fp::{batch_mul, batch_mul2};
 
 #[inline]
 fn fq_non_residue() -> Fq {
@@ -35,8 +40,8 @@ pub fn fq2_nonresidue() -> Fq2 {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct Fq2 {
-    c0: Fq,
-    c1: Fq,
+    pub c0: Fq,
+    pub c1: Fq,
 }
 
 impl Fq2 {
@@ -45,9 +50,14 @@ impl Fq2 {
     }
 
     pub fn scale(&self, by: Fq) -> Self {
-        Fq2 {
-            c0: self.c0 * by,
-            c1: self.c1 * by,
+        if cfg!(feature = "use_rvv-asm") {
+            let (c0, c1) = batch_mul2(self.c0, self.c1, by, by);
+            Fq2 { c0, c1 }
+        } else {
+            Fq2 {
+                c0: self.c0 * by,
+                c1: self.c1 * by,
+            }
         }
     }
 
@@ -98,27 +108,49 @@ impl FieldElement for Fq2 {
         // Devegili OhEig Scott Dahab
         //     Multiplication and Squaring on Pairing-Friendly Fields.pdf
         //     Section 3 (Complex squaring)
+        if cfg!(feature = "use_rvv_asm") {
+            let (a, b) = batch_mul2(
+                self.c0,
+                self.c1 * fq_non_residue() + self.c0,
+                self.c1,
+                self.c0 + self.c1,
+            );
 
-        let ab = self.c0 * self.c1;
+            Fq2 {
+                c0: b - a - a * fq_non_residue(),
+                c1: a + a,
+            }
+        } else {
+            let ab = self.c0 * self.c1;
 
-        Fq2 {
-            c0: (self.c1 * fq_non_residue() + self.c0) * (self.c0 + self.c1)
-                - ab
-                - ab * fq_non_residue(),
-            c1: ab + ab,
+            Fq2 {
+                c0: (self.c1 * fq_non_residue() + self.c0) * (self.c0 + self.c1)
+                    - ab
+                    - ab * fq_non_residue(),
+                c1: ab + ab,
+            }
         }
     }
 
     fn inverse(self) -> Option<Self> {
         // "High-Speed Software Implementation of the Optimal Ate Pairing
         // over Barreto–Naehrig Curves"; Algorithm 8
-
-        match (self.c0.squared() - (self.c1.squared() * fq_non_residue())).inverse() {
-            Some(t) => Some(Fq2 {
-                c0: self.c0 * t,
-                c1: -(self.c1 * t),
-            }),
-            None => None,
+        if cfg!(feature = "use_rvv_asm") {
+            match (self.c0.squared() - (self.c1.squared() * fq_non_residue())).inverse() {
+                Some(t) => {
+                    let (a, b) = batch_mul2(self.c0, self.c1, t, t);
+                    Some(Fq2 { c0: a, c1: -b })
+                }
+                None => None,
+            }
+        } else {
+            match (self.c0.squared() - (self.c1.squared() * fq_non_residue())).inverse() {
+                Some(t) => Some(Fq2 {
+                    c0: self.c0 * t,
+                    c1: -(self.c1 * t),
+                }),
+                None => None,
+            }
         }
     }
 }
@@ -130,13 +162,23 @@ impl Mul for Fq2 {
         // Devegili OhEig Scott Dahab
         //     Multiplication and Squaring on Pairing-Friendly Fields.pdf
         //     Section 3 (Karatsuba)
+        if cfg!(feature = "use_rvv_asm") {
+            let (aa, bb) = batch_mul2(self.c0, self.c1, other.c0, other.c1);
+            let (aa2, bb2) =
+                batch_mul2(bb, self.c0 + self.c1, fq_non_residue(), other.c0 + other.c1);
 
-        let aa = self.c0 * other.c0;
-        let bb = self.c1 * other.c1;
+            Fq2 {
+                c0: aa2 + aa,
+                c1: bb2 - aa - bb,
+            }
+        } else {
+            let aa = self.c0 * other.c0;
+            let bb = self.c1 * other.c1;
 
-        Fq2 {
-            c0: bb * fq_non_residue() + aa,
-            c1: (self.c0 + self.c1) * (other.c0 + other.c1) - aa - bb,
+            Fq2 {
+                c0: bb * fq_non_residue() + aa,
+                c1: (self.c0 + self.c1) * (other.c0 + other.c1) - aa - bb,
+            }
         }
     }
 }
@@ -260,4 +302,58 @@ fn sqrt_fq2() {
             .sqrt()
             .is_none()
     );
+}
+
+pub fn batch_mul3(
+    lhs1: Fq2,
+    lhs2: Fq2,
+    lhs3: Fq2,
+
+    rhs1: Fq2,
+    rhs2: Fq2,
+    rhs3: Fq2,
+) -> (Fq2, Fq2, Fq2) {
+    let lhs = [lhs1.c0, lhs1.c1, lhs2.c0, lhs2.c1, lhs3.c0, lhs3.c1];
+    let rhs = [rhs1.c0, rhs1.c1, rhs2.c0, rhs2.c1, rhs3.c0, rhs3.c1];
+    let mut result: [Fq; 6] = unsafe { mem::MaybeUninit::uninit().assume_init() };
+
+    batch_mul(&lhs, &rhs, &mut result);
+
+    let mut result2: [Fq; 6] = unsafe { mem::MaybeUninit::uninit().assume_init() };
+
+    let lhs = [
+        result[1],
+        lhs1.c0 + lhs1.c1,
+        result[3],
+        lhs2.c0 + lhs2.c1,
+        result[5],
+        lhs3.c0 + lhs3.c1,
+    ];
+    let rhs = [
+        fq_non_residue(),
+        rhs1.c0 + rhs1.c1,
+        fq_non_residue(),
+        rhs2.c0 + rhs2.c1,
+        fq_non_residue(),
+        rhs3.c0 + rhs3.c1,
+    ];
+    batch_mul(&lhs, &rhs, &mut result2);
+    let [a1, b1, a2, b2, a3, b3] = result2;
+
+    let r1 = Fq2 {
+        c0: a1 + result[0],
+        c1: b1 - result[0] - result[1],
+    };
+
+    let r2 = Fq2 {
+        c0: a2 + result[2],
+        c1: b2 - result[2] - result[3],
+    };
+
+    let r3 = Fq2 {
+        c0: a3 + result[4],
+        c1: b3 - result[4] - result[5],
+    };
+
+    (r1, r2, r3)
 }

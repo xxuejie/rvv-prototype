@@ -11,6 +11,8 @@ license = "MIT OR Apache-2.0"
 [features]
 default = []
 use_rvv_vector = []
+use_rvv_asm = []
+run_all_cases = []
 simulator = ["rvv/simulator"]
 
 # this configuration is very important to CKB-VM
@@ -27,6 +29,8 @@ lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 rvv = { path = "../rvv" }
 ckb-std = "0.9.0"
 rvv-simulator-runtime = { path = "../rvv-simulator-runtime" }
+rvv-asm = "0.1.11"
+
 
 
 [[bin]]
@@ -36,14 +40,35 @@ required-features = ["simulator", "use_rvv_vector"]
 
 [[bin]]
 path = "src/main.rs"
-name = "alt-bn128-example-rvv-asm"
+name = "alt-bn128-example-rvv-vector"
 required-features = ["use_rvv_vector"]
+
+[[bin]]
+path = "src/main.rs"
+name = "alt-bn128-example-rvv-vector-bench"
+required-features = ["use_rvv_vector", "run_all_cases"]
+
+[[bin]]
+path = "src/main.rs"
+name = "alt-bn128-example-rvv-asm"
+required-features = ["use_rvv_asm"]
+
+[[bin]]
+path = "src/main.rs"
+name = "alt-bn128-example-rvv-asm-bench"
+required-features = ["use_rvv_asm", "run_all_cases"]
 
 
 [[bin]]
 path = "src/main.rs"
 name = "alt-bn128-example-riscv-raw"
 required-features = []
+
+[[bin]]
+path = "src/main.rs"
+name = "alt-bn128-example-riscv-raw-bench"
+required-features = ["run_all_cases"]
+
 
 [[bin]]
 path = "src/bin/alt-bn128-example-x86-raw.rs"

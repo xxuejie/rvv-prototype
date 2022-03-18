@@ -1,5 +1,7 @@
 use crate::arith::{U256, U512};
 use crate::fields::FieldElement;
+use crate::rvv_impl::mont_multi_asm;
+use core::intrinsics::transmute;
 use core::ops::{Add, Mul, Neg, Sub};
 
 macro_rules! field_impl {
@@ -236,4 +238,40 @@ impl Fq {
 #[inline]
 pub fn const_fq(i: [u64; 4]) -> Fq {
     Fq(U256::from(i))
+}
+
+const NP1: [u128; 2] = [
+    0x9ede7d651eca6ac987d20782e4866389,
+    0xf57a22b791888c6bd8afcbd01833da80,
+];
+
+const NP1_ARRAY: [[u128; 2]; 32] = [
+    NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1,
+    NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1, NP1,
+];
+
+const N: [u128; 2] = [
+    0x97816a916871ca8d3c208c16d87cfd47,
+    0x30644e72e131a029b85045b68181585d,
+];
+
+const N_ARRAY: [[u128; 2]; 32] = [
+    N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N,
+];
+
+pub fn batch_mul(q1: &[Fq], q2: &[Fq], result: &mut [Fq]) {
+    unsafe {
+        let qq1 = transmute::<&[Fq], &[[u128; 2]]>(q1);
+        let qq2 = transmute::<&[Fq], &[[u128; 2]]>(q2);
+        let result2 = transmute::<&mut [Fq], &mut [[u128; 2]]>(result);
+        mont_multi_asm(&NP1_ARRAY, &N_ARRAY, qq1, qq2, result2);
+    }
+}
+
+pub fn batch_mul2(lhs1: Fq, lhs2: Fq, rhs1: Fq, rhs2: Fq) -> (Fq, Fq) {
+    let mut result: [Fq; 2] = [Fq::zero(), Fq::zero()];
+    let lhs = [lhs1, lhs2];
+    let rhs = [rhs1, rhs2];
+    batch_mul(&lhs, &rhs, &mut result);
+    (result[0], result[1])
 }
