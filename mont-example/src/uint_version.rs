@@ -204,7 +204,7 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
             "mv t1, {len}",
             "1:",
             // t2 = vl
-            "vsetvli t2, t1, e256, m4",
+            "vsetvli t2, t1, e256, m2",
 
             // load t0
             "mv t0, {value_t}",
@@ -255,7 +255,7 @@ pub fn mont_reduce_asm(np1: &[U256], n: &[U256], t: &[U512], bits: usize) -> Vec
             // vset
             "mv t1, {len}",
             "2:",
-            "vsetvli t2, t1, e512, m8",
+            "vsetvli t2, t1, e512, m2",
 
             // load t
             "mv t0, {value_t}",
@@ -332,7 +332,7 @@ pub fn mont_to_mont_asm(n: &[U256], r: &[U512], x: &[U256]) -> Vec<U256> {
 
             "mv t1, {len}",
             "1:",
-            "vsetvli t2, t1, e512, m8",
+            "vsetvli t2, t1, e512, m2",
 
             // load x
             "mv t0, {value_x}",
@@ -402,7 +402,7 @@ pub fn mont_multi_asm(np1: &[U256], n: &[U256], x: &[U256], y: &[U256], bits: us
 
             "mv t1, {len}",
             "1:",
-            "vsetvli t2, t1, e512, m8",
+            "vsetvli t2, t1, e512, m2",
 
             // load x
             "mv t0, {value_x}",
