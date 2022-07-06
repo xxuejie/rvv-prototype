@@ -43,11 +43,31 @@ pub const R2: [u64; 4] = [
     0x7c36e0e62c2380b7,
 ];
 pub const XI_TO_2P_MINUS2_OVER3: [[u64; 4]; 2] = [
-    [0x51678e7469b3c52a, 0x4fb98f8b13319fc9, 0x29b2254db3f1df75, 0x1c044935a3d22fb2],
-    [0x4d2ea218872f3d2c, 0x2fcb27fc4abe7b69, 0xd31d972f0e88ced9, 0x53adc04a00a73b15]
+    [
+        0x51678e7469b3c52a,
+        0x4fb98f8b13319fc9,
+        0x29b2254db3f1df75,
+        0x1c044935a3d22fb2,
+    ],
+    [
+        0x4d2ea218872f3d2c,
+        0x2fcb27fc4abe7b69,
+        0xd31d972f0e88ced9,
+        0x53adc04a00a73b15,
+    ],
 ];
 
 pub const XI_TO_P_MINUS1_OVER3: [[u64; 4]; 2] = [
-    [0x4f59e37c01832e57, 0xae6be39ac2bbbfe4, 0xe04ea1bb697512f8, 0x3097caa8fc40e10e],
-    [0xf8606916d3816f2c, 0x1e5c0d7926de927e, 0xbc45f3946d81185e, 0x80752a25aa738091],
+    [
+        0x4f59e37c01832e57,
+        0xae6be39ac2bbbfe4,
+        0xe04ea1bb697512f8,
+        0x3097caa8fc40e10e,
+    ],
+    [
+        0xf8606916d3816f2c,
+        0x1e5c0d7926de927e,
+        0xbc45f3946d81185e,
+        0x80752a25aa738091,
+    ],
 ];

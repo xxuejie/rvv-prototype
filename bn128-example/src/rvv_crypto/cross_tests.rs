@@ -446,7 +446,7 @@ pub fn test_gfp2_conjugate() {
 }
 
 pub fn test_gfp2_mul() {
-    let a = gfp2::Gfp2([
+    let mut a = gfp2::Gfp2([
         gfp::Gfp([123123123, 432432523, 12343432423, 5234543534]),
         gfp::Gfp([
             16045690984833335023,
@@ -469,9 +469,9 @@ pub fn test_gfp2_mul() {
             10355184993929758713,
         ]),
     ]);
-    let c = a * b;
+    a.mul_ref(&b);
     assert_eq!(
-        c,
+        a,
         gfp2::Gfp2([
             gfp::Gfp([
                 2489387057500270750,

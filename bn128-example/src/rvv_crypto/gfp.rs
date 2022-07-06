@@ -2,8 +2,8 @@
 // use alloc::format;
 // use ckb_std::syscalls::debug;
 
-use crate::arith::U256;
 use super::constants::*;
+use crate::arith::U256;
 use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 use rvv_asm::rvv_asm;
 
