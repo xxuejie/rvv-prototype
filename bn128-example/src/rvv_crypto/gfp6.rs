@@ -36,45 +36,37 @@ impl Gfp6 {
     }
 
     pub fn mul_ref(&mut self, b: &Gfp6) {
-        let mut v0 = self.z().clone();
-        v0.mul_ref(b.z());
-        let mut v1 = self.y().clone();
-        v1.mul_ref(b.y());
-        let mut v2 = self.x().clone();
-        v2.mul_ref(b.x());
+        let v0 = self.z() * b.z();
+        let v1 = self.y() * b.y();
+        let v2 = self.x() * b.x();
 
-        let mut t0 = self.x().clone();
-        t0.add_ref(self.y());
-        let mut t1 = b.x().clone();
-        t1.add_ref(b.y());
-        let mut tz = t0.clone();
-        tz.mul_ref(&t1);
-        tz.sub_ref(&v1);
-        tz.sub_ref(&v2);
+        let mut t0 = self.x() + self.y();
+        let mut t1 = b.x() + b.y();
+        let mut tz = (&t0) * (&t1);
+        tz -= &v1;
+        tz -= &v2;
         tz.mul_xi();
-        tz.add_ref(&v0);
+        tz += &v0;
 
         t0.set(self.y());
-        t0.add_ref(self.z());
+        t0 += self.z();
         t1.set(b.y());
-        t1.add_ref(b.z());
-        let mut ty = t0.clone();
-        ty.mul_ref(&t1);
+        t1 += b.z();
+        let mut ty = (&t0) * (&t1);
         t0.set(&v2);
         t0.mul_xi();
-        ty.sub_ref(&v0);
-        ty.sub_ref(&v1);
-        ty.add_ref(&t0);
+        ty -= &v0;
+        ty -= &v1;
+        ty += &t0;
 
         t0.set(self.x());
-        t0.add_ref(self.z());
+        t0 += self.z();
         t1.set(b.x());
-        t1.add_ref(b.z());
-        let mut tx = t0.clone();
-        tx.mul_ref(&t1);
-        tx.sub_ref(&v0);
-        tx.add_ref(&v1);
-        tx.sub_ref(&v2);
+        t1 += b.z();
+        let mut tx = (&t0) * (&t1);
+        tx -= &v0;
+        tx += &v1;
+        tx -= &v2;
 
         self.0[0].set(&tx);
         self.0[1].set(&ty);
@@ -82,9 +74,9 @@ impl Gfp6 {
     }
 
     pub fn add_ref(&mut self, b: &Gfp6) {
-        self.0[0].add_ref(&b.0[0]);
-        self.0[1].add_ref(&b.0[1]);
-        self.0[2].add_ref(&b.0[2]);
+        self.0[0] += &b.0[0];
+        self.0[1] += &b.0[1];
+        self.0[2] += &b.0[2];
     }
 
     pub fn mul_tau(&mut self) {
