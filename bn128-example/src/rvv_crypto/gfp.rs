@@ -3,53 +3,9 @@
 // use ckb_std::syscalls::debug;
 
 use crate::arith::U256;
+use super::constants::*;
 use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 use rvv_asm::rvv_asm;
-
-// See https://github.com/cloudflare/bn256/blob/9bd9f73a0273ed2f42707ed13b3e36d38baa2a49/constants.go
-// for the meaning of all constants.
-const NP: [u64; 4] = [
-    0x2387f9007f17daa9,
-    0x734b3343ab8513c8,
-    0x2524282f48054c12,
-    0x38997ae661c3ef3c,
-];
-const P2: [u64; 4] = [
-    0x185cac6c5e089667,
-    0xee5b88d120b5b59e,
-    0xaa6fecb86184dc21,
-    0x8fb501e34aa387f9,
-];
-const RN1: [u64; 4] = [
-    0xcbb781e36236117d,
-    0xcc65f3bcec8c91b,
-    0x2eab68888ea1f515,
-    0x1fc5c0956f92f825,
-];
-const P_MINUS2: [u64; 4] = [
-    0x185cac6c5e089665,
-    0xee5b88d120b5b59e,
-    0xaa6fecb86184dc21,
-    0x8fb501e34aa387f9,
-];
-const P_PLUS1_OVER4: [u64; 4] = [
-    0x86172b1b1782259a,
-    0x7b96e234482d6d67,
-    0x6a9bfb2e18613708,
-    0x23ed4078d2a8e1fe,
-];
-const R3: [u64; 4] = [
-    0x2af2dfb9324a5bb8,
-    0x388f899054f538a4,
-    0xdf2ff66396b107a7,
-    0x24ebbbb3a2529292,
-];
-const R2: [u64; 4] = [
-    0x9c21c3ff7e444f56,
-    0x409ed151b2efb0c2,
-    0xc6dc37b80fb1651,
-    0x7c36e0e62c2380b7,
-];
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gfp(pub [u64; 4]);
