@@ -411,16 +411,7 @@ pub fn test_gfp_mont_encode_decode() {
 }
 
 pub fn test_gfp2_conjugate() {
-    let mut a = gfp2::Gfp2([
-        gfp::Gfp([123123123, 432432523, 12343432423, 5234543534]),
-        gfp::Gfp([
-            16045690984833335023,
-            188899839028173,
-            72057594037927935,
-            320263130583841,
-        ]),
-    ]);
-    let b = gfp2::Gfp2([
+    let mut b = gfp2::Gfp2([
         gfp::Gfp([
             11250488846250692438,
             4656389213572280514,
@@ -434,9 +425,9 @@ pub fn test_gfp2_conjugate() {
             10355184993929758713,
         ]),
     ]);
-    a.conjugate(&b);
+    b.conjugate();
     assert_eq!(
-        a,
+        b,
         gfp2::Gfp2([
             gfp::Gfp([
                 8951722763660576529,

@@ -68,21 +68,20 @@ impl Gfp2 {
         self.x() == &gfp::ZERO && self.y() == &gfp::ONE
     }
 
-    pub fn conjugate(&mut self, a: &Gfp2) {
-        self.set(a);
-        gfp::neg(&mut self.0[0..1])
+    pub fn conjugate(&mut self) {
+        gfp::neg(self.x_slice_mut());
     }
 
     pub fn neg_ref(&mut self) {
-        gfp::neg(&mut self.0)
+        gfp::neg(&mut self.0);
     }
 
     pub fn add_ref(&mut self, b: &Gfp2) {
-        gfp::add_mov(&mut self.0, &b.0)
+        gfp::add_mov(&mut self.0, &b.0);
     }
 
     pub fn sub_ref(&mut self, b: &Gfp2) {
-        gfp::sub_mov(&mut self.0, &b.0)
+        gfp::sub_mov(&mut self.0, &b.0);
     }
 
     pub fn mul_ref(&mut self, b: &Gfp2) {
