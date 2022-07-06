@@ -3,7 +3,7 @@
 // use ckb_std::syscalls::debug;
 
 use crate::arith::U256;
-use core::ops::{Add, Mul, Neg, Sub};
+use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 use rvv_asm::rvv_asm;
 
 // See https://github.com/cloudflare/bn256/blob/9bd9f73a0273ed2f42707ed13b3e36d38baa2a49/constants.go
@@ -44,9 +44,18 @@ const R3: [u64; 4] = [
     0xdf2ff66396b107a7,
     0x24ebbbb3a2529292,
 ];
+const R2: [u64; 4] = [
+    0x9c21c3ff7e444f56,
+    0x409ed151b2efb0c2,
+    0xc6dc37b80fb1651,
+    0x7c36e0e62c2380b7,
+];
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gfp(pub [u64; 4]);
+
+pub const ONE: Gfp = Gfp([1, 0, 0, 0]);
+pub const ZERO: Gfp = Gfp([0, 0, 0, 0]);
 
 impl Gfp {
     // TODO: do we need a parallel version of exp?
@@ -73,6 +82,20 @@ impl Gfp {
     pub fn sqrt(&mut self) {
         self.exp(&P_PLUS1_OVER4)
     }
+
+    pub fn new_from_int64(x: i64) -> Self {
+        if x >= 0 {
+            Gfp([x as u64, 0, 0, 0])
+        } else {
+            let mut a = [Gfp([(-x) as u64, 0, 0, 0])];
+            neg(&mut a);
+            a[0].clone()
+        }
+    }
+
+    pub fn set(&mut self, a: &Gfp) {
+        self.0 = a.0;
+    }
 }
 
 impl From<Gfp> for U256 {
@@ -83,14 +106,17 @@ impl From<Gfp> for U256 {
     }
 }
 
+// TODO: do we want to introduce transmute to:
+// 1. Implement ops for reference types
+// 2. Eliminate the clones in assignment ops
 impl Add for Gfp {
     type Output = Gfp;
 
     fn add(self, a: Gfp) -> Gfp {
         let mut arr = [self];
         add_mov(&mut arr[..], &[a]);
-        // This is ugly but works, hopefully compiler can optimize it away
-        arr[0].clone()
+        let [r] = arr;
+        r
     }
 }
 
@@ -100,8 +126,8 @@ impl Mul for Gfp {
     fn mul(self, a: Gfp) -> Gfp {
         let mut arr = [self];
         mul_mov(&mut arr[..], &[a]);
-        // This is ugly but works, hopefully compiler can optimize it away
-        arr[0].clone()
+        let [r] = arr;
+        r
     }
 }
 
@@ -111,8 +137,8 @@ impl Neg for Gfp {
     fn neg(self) -> Gfp {
         let mut arr = [self];
         neg(&mut arr[..]);
-        // This is ugly but works, hopefully compiler can optimize it away
-        arr[0].clone()
+        let [r] = arr;
+        r
     }
 }
 
@@ -122,11 +148,34 @@ impl Sub for Gfp {
     fn sub(self, a: Gfp) -> Gfp {
         let mut arr = [self];
         sub_mov(&mut arr[..], &[a]);
-        // This is ugly but works, hopefully compiler can optimize it away
-        arr[0].clone()
+        let [r] = arr;
+        r
     }
 }
 
+impl AddAssign for Gfp {
+    fn add_assign(&mut self, other: Gfp) {
+        let mut arr = [self.clone()];
+        add_mov(&mut arr[..], &[other]);
+        self.0 = arr[0].0;
+    }
+}
+
+impl SubAssign for Gfp {
+    fn sub_assign(&mut self, other: Gfp) {
+        let mut arr = [self.clone()];
+        sub_mov(&mut arr[..], &[other]);
+        self.0 = arr[0].0;
+    }
+}
+
+/// WARNING: all functions involving inline rvv assembly must explicitly be
+/// marked with `#[inlnie(never)]`!!!!!!!
+/// We have noticed errors when multiple functions here are called together,
+/// inlining them would lead to the compiler optimizing away certain operations.
+/// A more proper way should be adding memory barriers, until we can find the
+/// correct way for inserting memory barriers, we have to mark then as non-inlinable.
+#[inline(never)]
 pub fn mul_mov(dst: &mut [Gfp], src: &[Gfp]) {
     debug_assert_eq!(dst.len(), src.len());
 
@@ -202,6 +251,7 @@ pub fn mul_mov(dst: &mut [Gfp], src: &[Gfp]) {
     // debug(format!("debug_val: {:?}", debug_val));
 }
 
+#[inline(never)]
 pub fn square(dst: &mut [Gfp]) {
     unsafe {
         // 4 registers as a group, that gives us 8 free v registers to use
@@ -268,6 +318,7 @@ pub fn square(dst: &mut [Gfp]) {
     }
 }
 
+#[inline(never)]
 pub fn mul_mov_scalar(dst: &mut [Gfp], src: &Gfp) {
     unsafe {
         // 4 registers as a group, that gives us 8 free v registers to use
@@ -336,6 +387,7 @@ pub fn mul_mov_scalar(dst: &mut [Gfp], src: &Gfp) {
     }
 }
 
+#[inline(never)]
 pub fn add_mov(dst: &mut [Gfp], src: &[Gfp]) {
     debug_assert_eq!(dst.len(), src.len());
 
@@ -392,6 +444,7 @@ pub fn add_mov(dst: &mut [Gfp], src: &[Gfp]) {
     }
 }
 
+#[inline(never)]
 pub fn sub_mov(dst: &mut [Gfp], src: &[Gfp]) {
     debug_assert_eq!(dst.len(), src.len());
 
@@ -449,6 +502,7 @@ pub fn sub_mov(dst: &mut [Gfp], src: &[Gfp]) {
     }
 }
 
+#[inline(never)]
 pub fn neg(dst: &mut [Gfp]) {
     unsafe {
         // 8 registers as a group since add is simple and can do with less
@@ -500,6 +554,7 @@ pub fn neg(dst: &mut [Gfp]) {
 
 /// Some input values might be larger than p, this normalizes the value so they
 /// remain regular
+#[inline(never)]
 pub fn normalize(dst: &mut [Gfp]) {
     unsafe {
         // 8 registers as a group since add is simple and can do with less
@@ -578,4 +633,12 @@ pub fn sub(a: &[Gfp], b: &[Gfp], c: &mut [Gfp]) {
 
     mov(c, a);
     sub_mov(c, b);
+}
+
+pub fn mont_encode(dst: &mut [Gfp]) {
+    mul_mov_scalar(dst, &Gfp(R2));
+}
+
+pub fn mont_decode(dst: &mut [Gfp]) {
+    mul_mov_scalar(dst, &Gfp([1, 0, 0, 0]));
 }
