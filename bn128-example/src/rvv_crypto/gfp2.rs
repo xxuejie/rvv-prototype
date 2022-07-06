@@ -17,23 +17,47 @@ impl Gfp2 {
         &self.0[1]
     }
 
+    pub fn x_slice(&self) -> &[Gfp] {
+        &self.0[0..1]
+    }
+
+    pub fn y_slice(&self) -> &[Gfp] {
+        &self.0[1..2]
+    }
+
+    pub fn x_slice_mut(&mut self) -> &mut [Gfp] {
+        &mut self.0[0..1]
+    }
+
+    pub fn y_slice_mut(&mut self) -> &mut [Gfp] {
+        &mut self.0[1..2]
+    }
+
+    pub fn set_x(&mut self, x: &Gfp) {
+        self.0[0].set(x);
+    }
+
+    pub fn set_y(&mut self, y: &Gfp) {
+        self.0[1].set(y);
+    }
+
     pub fn mont_decode(&mut self) {
         gfp::mont_decode(&mut self.0);
     }
 
     pub fn set(&mut self, a: &Gfp2) {
-        self.0[0].set(&a.0[0]);
-        self.0[1].set(&a.0[1]);
+        self.set_x(a.x());
+        self.set_y(a.y());
     }
 
     pub fn set_zero(&mut self) {
-        self.0[0] = gfp::ZERO;
-        self.0[1] = gfp::ZERO;
+        self.set_x(&gfp::ZERO);
+        self.set_y(&gfp::ZERO);
     }
 
     pub fn set_one(&mut self) {
-        self.0[0] = gfp::ZERO;
-        self.0[1] = gfp::ONE;
+        self.set_x(&gfp::ZERO);
+        self.set_y(&gfp::ONE);
     }
 
     pub fn is_zero(&self) -> bool {
@@ -82,6 +106,36 @@ impl Gfp2 {
         let [x, y] = orig.0;
         self.0[0] += y;
         self.0[1] -= x;
+    }
+
+    pub fn square(&mut self) {
+        // tx = y
+        let mut tx = [self.y().clone()];
+        // ty = x
+        let mut ty = [self.x().clone()];
+        // tx = y - x
+        gfp::sub_mov(&mut tx, self.x_slice());
+        // ty = x + y
+        gfp::add_mov(&mut ty, self.y_slice());
+        // ty = (y - x)(x + y)
+        gfp::mul_mov(&mut ty, &tx);
+        // tx = x * y
+        gfp::mul(self.x_slice(), self.y_slice(), &mut tx);
+        // tx = 2 * x * y
+        gfp::double(&mut tx);
+        self.set_x(&tx[0]);
+        self.set_y(&ty[0]);
+    }
+
+    pub fn invert(&mut self) {
+        let mut t = self.clone();
+        gfp::square(&mut t.0);
+        let [mut t1, t2] = t.0;
+        t1 = t1 + t2;
+        t1.invert();
+
+        gfp::neg(self.x_slice_mut());
+        gfp::mul_mov_scalar(&mut self.0, &t1);
     }
 }
 

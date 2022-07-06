@@ -445,6 +445,58 @@ pub fn add_mov(dst: &mut [Gfp], src: &[Gfp]) {
 }
 
 #[inline(never)]
+pub fn double(dst: &mut [Gfp]) {
+    unsafe {
+        // 8 registers as a group since add is simple and can do with less
+        // registers
+        // t1: vl
+        // t2: remaining element length
+        // t3: destination/source address variables
+        // t5: free variable
+        // v0, v8, v16, v24 are used.
+        rvv_asm!(
+            "mv t2, {len}",
+            "mv t3, {dst}",
+            "1:",
+            "vsetvli t1, t2, e256, m8",
+            // Load operands
+            "vle256.v v8, (t3)",
+            "vle256.v v16, (t3)",
+            // Add operands together
+            // c = a + b => v8, with carry in v0
+            "vmadc.vv v0, v8, v16",
+            "vadd.vv v8, v8, v16",
+            // gfpCarry on c
+            // Load p2 into v24
+            "mv t5, {p2}",
+            "vlse256.v v24, (t5), x0",
+            // c - p2 => v24, with carry in v16
+            "vmsbc.vv v16, v8, v24",
+            "vsub.vv v24, v8, v24",
+            // Combine carries
+            "vmandnot.mm v0, v16, v0",
+            // Select value, if carry is 1, use value in v8 (c),
+            // otherwise use value in v24 (c - p2)
+            "vmerge.vvm v8, v24, v8, v0",
+            // Store result
+            "vse256.v v8, (t3)",
+            // Update t2/t3, start the next loop if required, t2 contains the count
+            // of elements, so we do substraction using value in t1 directly.
+            "sub t2, t2, t1",
+            // t3, on the other hand, stores the address, we will need to consider
+            // element length asl well. A single element is 32 bytes, a shift left
+            // by 5 on t1 will do the task
+            "slli t1, t1, 5",
+            "add t3, t3, t1",
+            "blt x0, t2, 1b",
+            len = in (reg) dst.len(),
+            p2 = in (reg) P2.as_ptr(),
+            dst = in (reg) dst.as_ptr(),
+        );
+    }
+}
+
+#[inline(never)]
 pub fn sub_mov(dst: &mut [Gfp], src: &[Gfp]) {
     debug_assert_eq!(dst.len(), src.len());
 
