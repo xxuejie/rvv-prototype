@@ -387,7 +387,7 @@ pub fn mul_mov_scalar(dst: &mut [Gfp], src: &Gfp) {
     }
 }
 
-#[inline(never)]
+// #[inline(never)]
 pub fn add_mov(dst: &mut [Gfp], src: &[Gfp]) {
     debug_assert_eq!(dst.len(), src.len());
 
@@ -444,7 +444,7 @@ pub fn add_mov(dst: &mut [Gfp], src: &[Gfp]) {
     }
 }
 
-#[inline(never)]
+// #[inline(never)]
 pub fn sub_mov(dst: &mut [Gfp], src: &[Gfp]) {
     debug_assert_eq!(dst.len(), src.len());
 
