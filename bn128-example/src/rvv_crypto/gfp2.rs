@@ -1,7 +1,3 @@
-// extern crate alloc;
-// use alloc::format;
-// use ckb_std::syscalls::debug;
-
 use super::{
     gfp::{self, Gfp},
     macros::gfp_ops_impl,

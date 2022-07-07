@@ -166,6 +166,21 @@ impl Gfp12 {
         self
     }
 
+    pub fn invert(&mut self) -> &mut Self {
+        let mut t1 = self.x().clone();
+        t1.square();
+        let mut t2 = self.y().clone();
+        t2.square();
+
+        t1.mul_tau();
+        t2.sub_ref(&t1);
+        t2.invert();
+
+        self.x_mut().neg_ref();
+        self.mul_scalar(&t2);
+        self
+    }
+
     pub fn final_exponentiation(&mut self) {
         unimplemented!()
     }

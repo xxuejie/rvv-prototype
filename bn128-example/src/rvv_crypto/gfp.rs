@@ -484,20 +484,15 @@ pub fn sub_mov(dst: &mut [Gfp], src: &[Gfp]) {
             // Load a into v8, b into v16
             "vle256.v v8, (t3)",
             "vle256.v v16, (t4)",
-            // d = p2 - b => v16, carry is ignored
-            "vsub.vv v16, v24, v16",
-            // c = a + d => v16, with carry in v0
-            "vmadc.vv v0, v8, v16",
-            "vadd.vv v16, v8, v16",
-            // gfpCarry on c with carry
-            // c - p2 => v24, with carry in v8
-            "vmsbc.vv v8, v16, v24",
-            "vsub.vv v24, v16, v24",
-            // Combine carries
-            "vmandnot.mm v0, v8, v0",
-            // Select value, if carry is 1, use value in v16 (c),
-            // otherwise use value in v24 (c - p2)
-            "vmerge.vvm v8, v24, v16, v0",
+            // c = a - b => v8, carry is put in v0
+            "vmsbc.vv v0, v8, v16",
+            "vsub.vv v8, v8, v16",
+            // Clear v16 to all zeros
+            "vxor.vv v16, v16, v16",
+            // If carry is present, select p2 in v24, otherwise select 0 in v16
+            "vmerge.vvm v16, v16, v24, v0",
+            // Possibly add p2 to final result(when carry is present)
+            "vadd.vv v8, v8, v16",
             // Store result
             "vse256.v v8, (t3)",
             // Update t2/t3/t4, start the next loop if required, t2 contains the count
@@ -786,20 +781,15 @@ pub fn sub(a: &[Gfp], b: &[Gfp], c: &mut [Gfp]) {
             // Load a into v8, b into v16
             "vle256.v v8, (t3)",
             "vle256.v v16, (t4)",
-            // d = p2 - b => v16, carry is ignored
-            "vsub.vv v16, v24, v16",
-            // c = a + d => v16, with carry in v0
-            "vmadc.vv v0, v8, v16",
-            "vadd.vv v16, v8, v16",
-            // gfpCarry on c with carry
-            // c - p2 => v24, with carry in v8
-            "vmsbc.vv v8, v16, v24",
-            "vsub.vv v24, v16, v24",
-            // Combine carries
-            "vmandnot.mm v0, v8, v0",
-            // Select value, if carry is 1, use value in v16 (c),
-            // otherwise use value in v24 (c - p2)
-            "vmerge.vvm v8, v24, v16, v0",
+            // c = a - b => v8, carry is put in v0
+            "vmsbc.vv v0, v8, v16",
+            "vsub.vv v8, v8, v16",
+            // Clear v16 to all zeros
+            "vxor.vv v16, v16, v16",
+            // If carry is present, select p2 in v24, otherwise select 0 in v16
+            "vmerge.vvm v16, v16, v24, v0",
+            // Possibly add p2 to final result(when carry is present)
+            "vadd.vv v8, v8, v16",
             // Store result
             "vse256.v v8, (t6)",
             // Update t2/t3/t4, start the next loop if required, t2 contains the count
@@ -811,7 +801,6 @@ pub fn sub(a: &[Gfp], b: &[Gfp], c: &mut [Gfp]) {
             "slli t1, t1, 5",
             "add t3, t3, t1",
             "add t4, t4, t1",
-            "add t6, t6, t1",
             "blt x0, t2, 1b",
             len = in (reg) a.len(),
             p2 = in (reg) P2.as_ptr(),
