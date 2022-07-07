@@ -1,14 +1,36 @@
-// extern crate alloc;
-// use alloc::format;
-// use ckb_std::syscalls::debug;
-
-use super::constants::*;
+use super::{constants::*, Error};
 use crate::arith::U256;
+use core::convert::TryFrom;
 use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 use rvv_asm::rvv_asm;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gfp(pub [u64; 4]);
+
+impl TryFrom<&[u8]> for Gfp {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let mut e = [0u64; 4];
+
+        for w in 0..4 {
+            e[3 - w] = 0;
+            for b in 0..8 {
+                e[3 - w] += (value[8 * w + b] as u64) << (56 - 8 * b);
+            }
+        }
+
+        for i in (0..4).rev() {
+            if e[i] < P2[i] {
+                return Ok(Gfp(e));
+            }
+            if e[i] > P2[i] {
+                return Err("Coordinate exceeds modulus!".into());
+            }
+        }
+        return Err("Coordinate equals modulus!".into());
+    }
+}
 
 // Gfp::new_from_int64(1)
 pub const ONE: Gfp = Gfp([
@@ -20,6 +42,10 @@ pub const ONE: Gfp = Gfp([
 pub const ZERO: Gfp = Gfp([0, 0, 0, 0]);
 
 impl Gfp {
+    pub fn is_zero(&self) -> bool {
+        self == &ZERO
+    }
+
     // TODO: do we need a parallel version of exp?
     pub fn exp(&mut self, bits: &[u64; 4]) {
         let mut sum = [Gfp(RN1)];

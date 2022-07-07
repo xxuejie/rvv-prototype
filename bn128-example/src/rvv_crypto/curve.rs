@@ -1,7 +1,36 @@
-use super::gfp::{self, Gfp};
+use super::{
+    gfp::{self, Gfp},
+    Error,
+};
+use core::convert::{TryFrom, TryInto};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CurvePoint(pub [Gfp; 4]);
+
+impl TryFrom<&[u8]> for CurvePoint {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let mut xy: [Gfp; 2] = [value[0..32].try_into()?, value[32..64].try_into()?];
+        gfp::mont_encode(&mut xy);
+        let [x, y] = xy;
+        let mut point = CurvePoint([x, y, Gfp::default(), Gfp::default()]);
+
+        if point.x().is_zero() && point.y().is_zero() {
+            point.set_y(&gfp::ONE);
+            point.set_z(&gfp::ZERO);
+            point.set_t(&gfp::ZERO);
+        } else {
+            point.set_z(&gfp::ONE);
+            point.set_t(&gfp::ONE);
+
+            if !point.is_on_curve() {
+                return Err("malformed point!".into());
+            }
+        }
+        Ok(point)
+    }
+}
 
 // Gfp::new_from_int64(3)
 pub const CURVE_B: [Gfp; 1] = [Gfp([

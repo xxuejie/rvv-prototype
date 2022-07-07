@@ -10,6 +10,12 @@ fn bits(a: &U256) -> usize {
 pub struct Gfp12(pub [Gfp6; 2]);
 
 impl Gfp12 {
+    pub fn one() -> Self {
+        let mut a = Gfp12::default();
+        a.set_one();
+        a
+    }
+
     pub fn x(&self) -> &Gfp6 {
         &self.0[0]
     }

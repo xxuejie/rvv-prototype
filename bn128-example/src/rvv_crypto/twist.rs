@@ -1,7 +1,47 @@
-use super::{gfp::Gfp, gfp2::Gfp2};
+use super::{
+    gfp::{self, Gfp},
+    gfp2::Gfp2,
+    Error,
+};
+use core::convert::{TryFrom, TryInto};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TwistPoint(pub [Gfp2; 4]);
+
+impl TryFrom<&[u8]> for TwistPoint {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let mut xx_xy_yx_yy: [Gfp; 4] = [
+            value[0..32].try_into()?,
+            value[32..64].try_into()?,
+            value[64..96].try_into()?,
+            value[96..128].try_into()?,
+        ];
+        gfp::mont_encode(&mut xx_xy_yx_yy);
+        let [xx, xy, yx, yy] = xx_xy_yx_yy;
+        let mut point = TwistPoint([
+            Gfp2([xx, xy]),
+            Gfp2([yx, yy]),
+            Gfp2::default(),
+            Gfp2::default(),
+        ]);
+
+        if point.x().is_zero() && point.y().is_zero() {
+            point.y_mut().set_one();
+            point.z_mut().set_zero();
+            point.t_mut().set_zero();
+        } else {
+            point.z_mut().set_one();
+            point.t_mut().set_one();
+
+            if !point.is_on_curve() {
+                return Err("malformed point!".into());
+            }
+        }
+        Ok(point)
+    }
+}
 
 pub const TWIST_B: Gfp2 = Gfp2([
     Gfp([
