@@ -1,5 +1,6 @@
-use super::{constants::*, gfp::Gfp, gfp6::Gfp6};
+use super::{constants::*, gfp::Gfp, gfp6::Gfp6, macros::gfp_ops_impl};
 use crate::arith::U256;
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 fn bits(a: &U256) -> usize {
     256 - a.bits().take_while(|b| !b).count()
@@ -185,3 +186,5 @@ impl Gfp12 {
         unimplemented!()
     }
 }
+
+gfp_ops_impl!(Gfp12);
