@@ -3,7 +3,7 @@
 // use ckb_std::syscalls::debug;
 
 use super::gfp::{self, Gfp};
-use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gfp2(pub [Gfp; 2]);
@@ -41,23 +41,27 @@ impl Gfp2 {
         self.0[1].set(y);
     }
 
-    pub fn mont_decode(&mut self) {
+    pub fn mont_decode(&mut self) -> &mut Self {
         gfp::mont_decode(&mut self.0);
+        self
     }
 
-    pub fn set(&mut self, a: &Gfp2) {
+    pub fn set(&mut self, a: &Gfp2) -> &mut Self {
         self.set_x(a.x());
         self.set_y(a.y());
+        self
     }
 
-    pub fn set_zero(&mut self) {
+    pub fn set_zero(&mut self) -> &mut Self {
         self.set_x(&gfp::ZERO);
         self.set_y(&gfp::ZERO);
+        self
     }
 
-    pub fn set_one(&mut self) {
+    pub fn set_one(&mut self) -> &mut Self {
         self.set_x(&gfp::ZERO);
         self.set_y(&gfp::ONE);
+        self
     }
 
     pub fn is_zero(&self) -> bool {
@@ -68,23 +72,27 @@ impl Gfp2 {
         self.x() == &gfp::ZERO && self.y() == &gfp::ONE
     }
 
-    pub fn conjugate(&mut self) {
+    pub fn conjugate(&mut self) -> &mut Self {
         gfp::neg(self.x_slice_mut());
+        self
     }
 
-    pub fn neg_ref(&mut self) {
+    pub fn neg_ref(&mut self) -> &mut Self {
         gfp::neg(&mut self.0);
+        self
     }
 
-    pub fn add_ref(&mut self, b: &Gfp2) {
+    pub fn add_ref(&mut self, b: &Gfp2) -> &mut Self {
         gfp::add_mov(&mut self.0, &b.0);
+        self
     }
 
-    pub fn sub_ref(&mut self, b: &Gfp2) {
+    pub fn sub_ref(&mut self, b: &Gfp2) -> &mut Self {
         gfp::sub_mov(&mut self.0, &b.0);
+        self
     }
 
-    pub fn mul_ref(&mut self, b: &Gfp2) {
+    pub fn mul_ref(&mut self, b: &Gfp2) -> &mut Self {
         let mut tx_t = [self.0[1].clone(), self.0[0].clone()];
         gfp::mul_mov(&mut tx_t, &b.0);
         gfp::mul_mov(&mut self.0, &b.0);
@@ -92,22 +100,25 @@ impl Gfp2 {
         self.0[1] -= self.0[0].clone();
         let [tx1, tx2] = tx_t;
         self.0[0] = tx1 + tx2;
+        self
     }
 
-    pub fn mul_scalar(&mut self, b: &Gfp) {
+    pub fn mul_scalar(&mut self, b: &Gfp) -> &mut Self {
         gfp::mul_mov_scalar(&mut self.0, b);
+        self
     }
 
-    pub fn mul_xi(&mut self) {
+    pub fn mul_xi(&mut self) -> &mut Self {
         let orig = self.clone();
         gfp::add_mov(&mut self.0, &orig.0);
         gfp::add_mov(&mut self.0, &orig.0);
         let [x, y] = orig.0;
         self.0[0] += y;
         self.0[1] -= x;
+        self
     }
 
-    pub fn square(&mut self) {
+    pub fn square(&mut self) -> &mut Self {
         // tx = y
         let mut tx = [self.y().clone()];
         // ty = x
@@ -124,9 +135,10 @@ impl Gfp2 {
         gfp::double(&mut tx);
         self.set_x(&tx[0]);
         self.set_y(&ty[0]);
+        self
     }
 
-    pub fn invert(&mut self) {
+    pub fn invert(&mut self) -> &mut Self {
         let mut t = self.clone();
         gfp::square(&mut t.0);
         let [mut t1, t2] = t.0;
@@ -135,6 +147,7 @@ impl Gfp2 {
 
         gfp::neg(self.x_slice_mut());
         gfp::mul_mov_scalar(&mut self.0, &t1);
+        self
     }
 }
 
@@ -262,5 +275,17 @@ impl AddAssign for Gfp2 {
 impl AddAssign<&Gfp2> for Gfp2 {
     fn add_assign(&mut self, other: &Gfp2) {
         self.add_ref(&other);
+    }
+}
+
+impl MulAssign for Gfp2 {
+    fn mul_assign(&mut self, other: Gfp2) {
+        self.mul_ref(&other);
+    }
+}
+
+impl MulAssign<&Gfp2> for Gfp2 {
+    fn mul_assign(&mut self, other: &Gfp2) {
+        self.mul_ref(&other);
     }
 }

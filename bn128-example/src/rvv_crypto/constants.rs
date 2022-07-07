@@ -56,7 +56,6 @@ pub const XI_TO_2P_MINUS2_OVER3: [[u64; 4]; 2] = [
         0x53adc04a00a73b15,
     ],
 ];
-
 pub const XI_TO_P_MINUS1_OVER3: [[u64; 4]; 2] = [
     [
         0x4f59e37c01832e57,
@@ -70,4 +69,16 @@ pub const XI_TO_P_MINUS1_OVER3: [[u64; 4]; 2] = [
         0xbc45f3946d81185e,
         0x80752a25aa738091,
     ],
+];
+pub const XI_TO_2P_SQUARED_MINUS2_OVER3: [u64; 4] = [
+    0x3642364f386c1db8,
+    0xe825f92d2acd661f,
+    0xf2aba7e846c19d14,
+    0x5a0bcea3dc52b7a0,
+];
+pub const XI_TO_P_SQUARED_MINUS1_OVER3: [u64; 4] = [
+    0x12d3cef5e1ada57d,
+    0xe2eca1463753babb,
+    0xca41e40ddccf750,
+    0x551337060397e04c,
 ];
