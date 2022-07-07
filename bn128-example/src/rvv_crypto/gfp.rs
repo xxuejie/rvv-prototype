@@ -10,7 +10,12 @@ use rvv_asm::rvv_asm;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gfp(pub [u64; 4]);
 
-pub const ONE: Gfp = Gfp([1, 0, 0, 0]);
+pub const ONE: Gfp = Gfp([
+    16691276537507834265,
+    1271272038023711329,
+    6165449088192685022,
+    8091559079779792902,
+]);
 pub const ZERO: Gfp = Gfp([0, 0, 0, 0]);
 
 impl Gfp {
@@ -40,13 +45,16 @@ impl Gfp {
     }
 
     pub fn new_from_int64(x: i64) -> Self {
-        if x >= 0 {
-            Gfp([x as u64, 0, 0, 0])
+        let mut arr = if x >= 0 {
+            [Gfp([x as u64, 0, 0, 0])]
         } else {
             let mut a = [Gfp([(-x) as u64, 0, 0, 0])];
             neg(&mut a);
-            a[0].clone()
-        }
+            a
+        };
+        mont_encode(&mut arr);
+        let [a] = arr;
+        a
     }
 
     pub fn set(&mut self, a: &Gfp) {

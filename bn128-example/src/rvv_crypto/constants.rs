@@ -1,3 +1,5 @@
+use super::{gfp::Gfp, gfp2::Gfp2};
+
 // See https://github.com/cloudflare/bn256/blob/9bd9f73a0273ed2f42707ed13b3e36d38baa2a49/constants.go
 // for the meaning of all constants.
 pub const NP: [u64; 4] = [
@@ -82,3 +84,40 @@ pub const XI_TO_P_SQUARED_MINUS1_OVER3: [u64; 4] = [
     0xca41e40ddccf750,
     0x551337060397e04c,
 ];
+pub const XI_TO_P_MINUS1_OVER6: [[u64; 4]; 2] = [
+    [
+        0x25af52988477cdb7,
+        0x3d81a455ddced86a,
+        0x227d012e872c2431,
+        0x179198d3ea65d05,
+    ],
+    [
+        0x7407634dd9cca958,
+        0x36d5bd6c7afb8f26,
+        0xf4b1c32cebd880fa,
+        0x6aa7869306f455f,
+    ],
+];
+pub const XI_TO_P_SQUARED_MINUS1_OVER6: [u64; 4] = [
+    0xe21a761d259c78af,
+    0x6358fa3f5e84f7e,
+    0xb7c444d01ac33f0d,
+    0x35a9333f6e50d058,
+];
+pub const U: [u64; 4] = [6518589491078791937, 0, 0, 0];
+pub const P: [u64; 4] = [
+    1755467536201717351,
+    17175472035685840286,
+    12281294985516866593,
+    10355184993929758713,
+];
+pub const ORDER: [u64; 4] = [
+    1886713967064937057,
+    3354493509585025316,
+    12281294985516866593,
+    10355184993929758713,
+];
+
+pub fn constant_to_gfp2(a: &[[u64; 4]; 2]) -> Gfp2 {
+    Gfp2([Gfp(a[0]), Gfp(a[1])])
+}

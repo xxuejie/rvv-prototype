@@ -1,11 +1,8 @@
-use super::{constants::*, gfp::Gfp, gfp2::Gfp2};
+use super::{constants::*, gfp::Gfp, gfp2::Gfp2, macros::gfp_ops_impl};
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gfp6(pub [Gfp2; 3]);
-
-fn constant_to_gfp2(a: &[[u64; 4]; 2]) -> Gfp2 {
-    Gfp2([Gfp(a[0]), Gfp(a[1])])
-}
 
 impl Gfp6 {
     pub fn x(&self) -> &Gfp2 {
@@ -233,3 +230,5 @@ impl Gfp6 {
         self
     }
 }
+
+gfp_ops_impl!(Gfp6);
