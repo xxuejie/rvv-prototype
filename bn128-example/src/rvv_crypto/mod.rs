@@ -12,6 +12,7 @@ pub mod twist;
 use self::{curve::CurvePoint, gfp12::Gfp12, twist::TwistPoint};
 use core::convert::TryInto;
 
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     Str(&'static str),
     StrArg1(&'static str, u64),
