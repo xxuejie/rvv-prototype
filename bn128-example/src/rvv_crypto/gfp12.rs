@@ -2,15 +2,7 @@ use super::{constants::*, gfp::Gfp, gfp6::Gfp6};
 use crate::arith::U256;
 
 fn bits(a: &U256) -> usize {
-    // This is essentially:
-    // 256 - a.bits().take_while(|b| !b).count()
-    // But saves 2 million of ckb-vm cycles per invocation
-    for i in (0..256).rev() {
-        if a.get_bit(i).unwrap_or(false) {
-            return i;
-        }
-    }
-    0
+    256 - a.bits().take_while(|b| !b).count()
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -144,8 +136,7 @@ impl Gfp12 {
         sum.set_one();
         let mut t = Gfp12::default();
 
-        let overall_bits = bits(power);
-        for i in (0..overall_bits).rev() {
+        for i in (0..bits(power)).rev() {
             t.set(&sum).square();
             if power.get_bit(i).unwrap_or(false) {
                 sum.set(&t).mul_ref(self);
