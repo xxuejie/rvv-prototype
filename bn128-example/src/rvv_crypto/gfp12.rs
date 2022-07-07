@@ -182,8 +182,70 @@ impl Gfp12 {
         self
     }
 
-    pub fn final_exponentiation(&mut self) {
-        unimplemented!()
+    pub fn final_exponentiation(&mut self) -> &mut Self {
+        // p^6-Frobenus
+        let mut t1 = self.clone();
+        t1.x_mut().neg_ref();
+
+        let mut inv = self.clone();
+        inv.invert();
+        t1.mul_ref(&inv);
+
+        let mut t2 = t1.clone();
+        t2.frobenius_p2();
+        t1.mul_ref(&t2);
+
+        let mut fp = t1.clone();
+        fp.frobenius();
+        let mut fp2 = t1.clone();
+        fp2.frobenius_p2();
+        let mut fp3 = fp2.clone();
+        fp3.frobenius();
+
+        let mut fu = t1.clone();
+        fu.exp(&U.into());
+        let mut fu2 = fu.clone();
+        fu2.exp(&U.into());
+        let mut fu3 = fu2.clone();
+        fu3.exp(&U.into());
+
+        let mut y3 = fu.clone();
+        y3.frobenius();
+        let mut fu2p = fu2.clone();
+        fu2p.frobenius();
+        let mut fu3p = fu3.clone();
+        fu3p.frobenius();
+        let mut y2 = fu2.clone();
+        y2.frobenius_p2();
+
+        let mut y0 = fp.clone();
+        y0.mul_ref(&fp2).mul_ref(&fp3);
+
+        let mut y1 = t1.clone();
+        y1.conjugate();
+        let mut y5 = fu2.clone();
+        y5.conjugate();
+        y3.conjugate();
+        let mut y4 = fu.clone();
+        y4.mul_ref(&fu2p);
+        y4.conjugate();
+
+        let mut y6 = fu3.clone();
+        y6.mul_ref(&fu3p);
+        y6.conjugate();
+
+        let mut t0 = y6.clone();
+        t0.square();
+        t0.mul_ref(&y4).mul_ref(&y5);
+        t1.set(&y3).mul_ref(&y5).mul_ref(&t0);
+        t0.mul_ref(&y2);
+        t1.square().mul_ref(&t0).square();
+        t0.set(&t1).mul_ref(&y1);
+        t1.mul_ref(&y0);
+        t0.square().mul_ref(&t1);
+
+        *self = t0;
+        self
     }
 }
 
