@@ -10,6 +10,7 @@ use rvv_asm::rvv_asm;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gfp(pub [u64; 4]);
 
+// Gfp::new_from_int64(1)
 pub const ONE: Gfp = Gfp([
     16691276537507834265,
     1271272038023711329,
