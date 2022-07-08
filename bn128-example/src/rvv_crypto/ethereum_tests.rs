@@ -33,7 +33,7 @@ pub fn test_entry() {
         let mut buf0 = [0x00; 4096];
         let mut buf1 = [0x00; 32];
         hex2bin(inputs, &mut buf0[..]);
-        let result = alt_bn128_pairing(&buf0[0..inputs.len() / 2], &mut buf1[0]);
+        let result = alt_bn128_pairing(&buf0[0..inputs.len() / 2], &mut buf1[31]);
         if let Err(e) = &result {
             debug(format!("Pairing check error: {:?}", e));
         }

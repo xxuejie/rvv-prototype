@@ -108,8 +108,11 @@ impl Gfp2 {
     }
 
     pub fn mul_xi(&mut self) -> &mut Self {
+        // tx is kept in self, a is kept in orig
         let orig = self.clone();
         gfp::add_mov(&mut self.0, &orig.0);
+        gfp::double(&mut self.0);
+        gfp::double(&mut self.0);
         gfp::add_mov(&mut self.0, &orig.0);
         let [x, y] = orig.0;
         self.0[0] += y;

@@ -34,10 +34,10 @@ impl TryFrom<&[u8]> for Gfp {
 
 // Gfp::new_from_int64(1)
 pub const ONE: Gfp = Gfp([
-    16691276537507834265,
-    1271272038023711329,
-    6165449088192685022,
-    8091559079779792902,
+    15230403791020821917,
+    754611498739239741,
+    7381016538464732716,
+    1011752739694698287,
 ]);
 pub const ZERO: Gfp = Gfp([0, 0, 0, 0]);
 
@@ -65,10 +65,6 @@ impl Gfp {
 
     pub fn invert(&mut self) {
         self.exp(&P_MINUS2)
-    }
-
-    pub fn sqrt(&mut self) {
-        self.exp(&P_PLUS1_OVER4)
     }
 
     pub fn new_from_int64(x: i64) -> Self {

@@ -164,6 +164,7 @@ impl Gfp6 {
     pub fn mul_tau(&mut self) -> &mut Self {
         let mut tz = self.x().clone();
         tz.mul_xi();
+
         self.0[0].set(&self.y().clone());
         self.0[1].set(&self.z().clone());
         self.0[2].set(&tz);
