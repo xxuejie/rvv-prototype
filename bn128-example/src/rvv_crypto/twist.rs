@@ -36,7 +36,7 @@ impl TryFrom<&[u8]> for TwistPoint {
             point.t_mut().set_one();
 
             if !point.is_on_curve() {
-                return Err("malformed point!".into());
+                return Err("malformed twist point!".into());
             }
         }
         Ok(point)

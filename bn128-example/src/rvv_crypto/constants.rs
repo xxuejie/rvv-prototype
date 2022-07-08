@@ -58,6 +58,20 @@ pub const XI_TO_2P_MINUS2_OVER3: [[u64; 4]; 2] = [
         0x53adc04a00a73b15,
     ],
 ];
+pub const XI_TO_P_MINUS1_OVER2: [[u64; 4]; 2] = [
+    [
+        0x19da71333653ee20,
+        0x7eaaf34fc6ed6019,
+        0xc4ba3a29a60cdd1d,
+        0x75281311bcc9df79,
+    ],
+    [
+        0x18dbee03fb7708fa,
+        0x1e7601a602c843c7,
+        0x5dde0688cdb231cb,
+        0x86db5cf2c605a524,
+    ],
+];
 pub const XI_TO_P_MINUS1_OVER3: [[u64; 4]; 2] = [
     [
         0x4f59e37c01832e57,

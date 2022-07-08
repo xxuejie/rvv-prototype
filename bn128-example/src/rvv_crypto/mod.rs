@@ -7,9 +7,10 @@ pub mod gfp12;
 pub mod gfp2;
 pub mod gfp6;
 mod macros;
+pub mod miller;
 pub mod twist;
 
-use self::{curve::CurvePoint, gfp12::Gfp12, twist::TwistPoint};
+use self::{curve::CurvePoint, gfp12::Gfp12, miller::miller, twist::TwistPoint};
 use core::convert::TryInto;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -34,7 +35,7 @@ pub fn alt_bn128_pairing(data: &[u8], output: &mut u8) -> Result<(), Error> {
         let g1: CurvePoint = data[i * 192..i * 192 + 64].try_into()?;
         let g2: TwistPoint = data[i * 192 + 64..i * 192 + 192].try_into()?;
 
-        acc.mul_ref(&miller(&g2, &g1));
+        acc.mul_ref(&miller(g2, g1));
     }
     acc.final_exponentiation();
     if acc.is_one() {
@@ -43,8 +44,4 @@ pub fn alt_bn128_pairing(data: &[u8], output: &mut u8) -> Result<(), Error> {
         *output = 0;
     }
     Ok(())
-}
-
-pub fn miller(q: &TwistPoint, p: &CurvePoint) -> Gfp12 {
-    unimplemented!()
 }

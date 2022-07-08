@@ -25,7 +25,7 @@ impl TryFrom<&[u8]> for CurvePoint {
             point.set_t(&gfp::ONE);
 
             if !point.is_on_curve() {
-                return Err("malformed point!".into());
+                return Err("malformed curve point!".into());
             }
         }
         Ok(point)
