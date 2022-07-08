@@ -68,6 +68,11 @@ pub fn program_entry(argc: u64, argv: *const *const u8) -> i8 {
             alt_bn128_example::rvv_crypto::ethereum_tests::test_entry();
             debug(format!("rvv-crypto ethereum test done"));
             return 0;
+        } else if arg1 == "rvv_crypto_ethereum_benches" {
+            debug(format!("start rvv-crypto ethereum benches"));
+            alt_bn128_example::rvv_crypto::ethereum_tests::bench_entry();
+            debug(format!("rvv-crypto ethereum bench done"));
+            return 0;
         }
     }
 

@@ -3,6 +3,15 @@ use super::alt_bn128_pairing;
 use alloc::format;
 use ckb_std::syscalls::debug;
 
+#[link(name = "ckb-syscall")]
+extern "C" {
+    fn syscall(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, a5: u64, a6: u64, a7: u64) -> u64;
+}
+
+fn time_nsecs() -> u64 {
+    unsafe { syscall(0, 0, 0, 0, 0, 0, 0, 9285) }
+}
+
 fn hex2bin(s: &str, output: &mut [u8]) {
     for i in (0..s.len()).step_by(2) {
         let b = u8::from_str_radix(&s[i..i + 2], 16).unwrap();
@@ -27,19 +36,55 @@ const ALT_BN128_PAIRING_CASE: [(&str, &str, &str); 14] = [
     ("ten_point_match_3", "105456a333e6d636854f987ea7bb713dfd0ae8371a72aea313ae0c32c0bf10160cf031d41b41557f3e7e3ba0c51bebe5da8e6ecd855ec50fc87efcdeac168bcc0476be093a6d2b4bbf907172049874af11e1b6267606e00804d3ff0037ec57fd3010c68cb50161b7d1d96bb71edfec9880171954e56871abf3d93cc94d745fa114c059d74e5b6c4ec14ae5864ebe23a71781d86c29fb8fb6cce94f70d3de7a2101b33461f39d9e887dbb100f170a2345dde3c07e256d1dfa2b657ba5cd030427000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000021a2c3013d2ea92e13c800cde68ef56a294b883f6ac35d25f587c09b1b3c635f7290158a80cd3d66530f74dc94c94adb88f5cdb481acca997b6e60071f08a115f2f997f3dbd66a7afe07fe7862ce239edba9e05c5afff7f8a1259c9733b2dfbb929d1691530ca701b4a106054688728c9972c8512e9789e9567aae23e302ccd75", "0000000000000000000000000000000000000000000000000000000000000001"),
 ];
 
+const WARMUP_RUNS: usize = 5;
+const BENCH_RUNS: usize = 20;
+
+pub fn bench_entry() {
+    let mut runtimes = [0u64; 14];
+    for (i, (name, inputs, expect)) in ALT_BN128_PAIRING_CASE.iter().enumerate() {
+        debug(format!("Warming up test: {}", name));
+        for _ in 0..WARMUP_RUNS {
+            run(inputs, expect);
+        }
+        debug(format!("Benchmarking test: {}", name));
+        let mut total_nsecs = 0u64;
+        for _ in 0..BENCH_RUNS {
+            let a = time_nsecs();
+            run(inputs, expect);
+            let b = time_nsecs();
+
+            total_nsecs += b - a;
+        }
+        let single_run_time = total_nsecs / BENCH_RUNS as u64;
+        runtimes[i] = single_run_time;
+    }
+
+    debug(format!("Benchmark done! Here are the results:"));
+    for (i, runtime) in runtimes.iter().enumerate() {
+        debug(format!(
+            "{}: {} ns/op",
+            ALT_BN128_PAIRING_CASE[i].0, runtime
+        ));
+    }
+}
+
 pub fn test_entry() {
     for (name, inputs, expect) in &ALT_BN128_PAIRING_CASE {
         debug(format!("Running test: {}", name));
-        let mut buf0 = [0x00; 4096];
-        let mut buf1 = [0x00; 32];
-        hex2bin(inputs, &mut buf0[..]);
-        let result = alt_bn128_pairing(&buf0[0..inputs.len() / 2], &mut buf1[31]);
-        if let Err(e) = &result {
-            debug(format!("Pairing check error: {:?}", e));
-        }
-        assert!(result.is_ok());
-        hex2bin(expect, &mut buf0[..]);
-        assert_eq!(buf0[0..32], buf1[..]);
+        run(inputs, expect);
         debug(format!("Test: {} passed!", name));
     }
+}
+
+fn run(inputs: &str, expect: &str) {
+    let mut buf0 = [0x00; 4096];
+    let mut buf1 = [0x00; 32];
+    hex2bin(inputs, &mut buf0[..]);
+    let result = alt_bn128_pairing(&buf0[0..inputs.len() / 2], &mut buf1[31]);
+    if let Err(e) = &result {
+        debug(format!("Pairing check error: {:?}", e));
+    }
+    assert!(result.is_ok());
+    hex2bin(expect, &mut buf0[..]);
+    assert_eq!(buf0[0..32], buf1[..]);
 }
