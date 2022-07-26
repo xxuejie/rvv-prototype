@@ -737,13 +737,13 @@ pub fn mul_by_byte_index(a: &[Gfp], b: &[Gfp], a_index: &[u8], b_index: &[u8], c
             "1:",
             "vsetvli t1, t2, e256, m4",
             // Load operand indices
-            "vle8.v v24, (t3)",
-            "vle8.v v28, (t4)",
+            "vle8.v v0, (t3)",
+            "vle8.v v4, (t4)",
             // Load actual operands
             "mv t5, {a}",
-            "vluxei8.v v0, (t5), v24",
+            "vluxei8.v v0, (t5), v0",
             "mv t5, {b}",
-            "vluxei8.v v4, (t5), v28",
+            "vluxei8.v v4, (t5), v4",
             // Load np => v24, p2 => v28
             "mv t5, {np}",
             "vlse256.v v24, (t5), x0",
