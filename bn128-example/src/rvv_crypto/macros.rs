@@ -22,9 +22,7 @@ macro_rules! gfp_ops_impl {
             type Output = $name;
 
             fn add(self, a: &$name) -> $name {
-                let mut r = self.clone();
-                r.add_ref(a);
-                r
+                $name::add_to(self, a)
             }
         }
 
@@ -50,9 +48,7 @@ macro_rules! gfp_ops_impl {
             type Output = $name;
 
             fn mul(self, a: &$name) -> $name {
-                let mut r = self.clone();
-                r.mul_ref(a);
-                r
+                $name::mul_to(self, a)
             }
         }
 
@@ -97,9 +93,7 @@ macro_rules! gfp_ops_impl {
             type Output = $name;
 
             fn sub(self, a: &$name) -> $name {
-                let mut r = self.clone();
-                r.sub_ref(a);
-                r
+                $name::sub_to(self, a)
             }
         }
 

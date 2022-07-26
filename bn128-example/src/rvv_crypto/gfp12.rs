@@ -1,5 +1,6 @@
 use super::{constants::*, gfp::Gfp, gfp6::Gfp6, macros::gfp_ops_impl};
 use crate::arith::U256;
+use core::mem::MaybeUninit;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 fn bits(a: &U256) -> usize {
@@ -109,10 +110,24 @@ impl Gfp12 {
         self
     }
 
+    pub fn add_to(a: &Gfp12, b: &Gfp12) -> Self {
+        let mut r: Gfp12 = unsafe { MaybeUninit::uninit().assume_init() };
+        r.0[0] = a.x() + b.x();
+        r.0[1] = a.y() + b.y();
+        r
+    }
+
     pub fn sub_ref(&mut self, b: &Gfp12) -> &mut Self {
         self.x_mut().sub_ref(&b.x());
         self.y_mut().sub_ref(&b.y());
         self
+    }
+
+    pub fn sub_to(a: &Gfp12, b: &Gfp12) -> Self {
+        let mut r: Gfp12 = unsafe { MaybeUninit::uninit().assume_init() };
+        r.0[0] = a.x() - b.x();
+        r.0[1] = a.y() - b.y();
+        r
     }
 
     pub fn mul_ref(&mut self, b: &Gfp12) -> &mut Self {
@@ -130,6 +145,23 @@ impl Gfp12 {
         self.0[1].set(&ty);
         self.0[1].add_ref(&t);
         self
+    }
+
+    pub fn mul_to(a: &Gfp12, b: &Gfp12) -> Self {
+        let mut tx = a.x().clone();
+        tx.mul_ref(b.y());
+        let mut t = b.x().clone();
+        t.mul_ref(a.y());
+        tx.add_ref(&t);
+
+        let mut ty = a.y().clone();
+        ty.mul_ref(b.y());
+        t.set(a.x()).mul_ref(b.x()).mul_tau();
+
+        let mut r: Gfp12 = unsafe { MaybeUninit::uninit().assume_init() };
+        r.0[0] = tx;
+        r.0[1] = &ty + &t;
+        r
     }
 
     pub fn mul_scalar(&mut self, b: &Gfp6) -> &mut Self {

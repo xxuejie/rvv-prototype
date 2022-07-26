@@ -2,6 +2,7 @@ use super::{
     gfp::{self, Gfp},
     macros::gfp_ops_impl,
 };
+use core::mem::MaybeUninit;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 const MUL_A_INDEX: [u8; 4] = [0, 32, 32, 0];
@@ -89,18 +90,41 @@ impl Gfp2 {
         self
     }
 
+    pub fn add_to(a: &Gfp2, b: &Gfp2) -> Self {
+        let mut r: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::add(&a.0, &b.0, &mut r.0);
+        r
+    }
+
     pub fn sub_ref(&mut self, b: &Gfp2) -> &mut Self {
         gfp::sub_mov(&mut self.0, &b.0);
         self
     }
 
+    pub fn sub_to(a: &Gfp2, b: &Gfp2) -> Self {
+        let mut r: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::sub(&a.0, &b.0, &mut r.0);
+        r
+    }
+
     pub fn mul_ref(&mut self, b: &Gfp2) -> &mut Self {
-        let mut tx_t1_ty_t2: [Gfp; 4] = Default::default();
+        // mul_by_byte_index below will fill in all the data
+        let mut tx_t1_ty_t2: [Gfp; 4] = unsafe { MaybeUninit::uninit().assume_init() };
         gfp::mul_by_byte_index(&self.0, &b.0, &MUL_A_INDEX, &MUL_B_INDEX, &mut tx_t1_ty_t2);
 
         gfp::add(&tx_t1_ty_t2[0..1], &tx_t1_ty_t2[1..2], &mut self.0[0..1]);
         gfp::sub(&tx_t1_ty_t2[2..3], &tx_t1_ty_t2[3..4], &mut self.0[1..2]);
         self
+    }
+
+    pub fn mul_to(a: &Gfp2, b: &Gfp2) -> Self {
+        let mut tx_t1_ty_t2: [Gfp; 4] = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::mul_by_byte_index(&a.0, &b.0, &MUL_A_INDEX, &MUL_B_INDEX, &mut tx_t1_ty_t2);
+
+        let mut r: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::add(&tx_t1_ty_t2[0..1], &tx_t1_ty_t2[1..2], &mut r.0[0..1]);
+        gfp::sub(&tx_t1_ty_t2[2..3], &tx_t1_ty_t2[3..4], &mut r.0[1..2]);
+        r
     }
 
     pub fn mul_scalar(&mut self, b: &Gfp) -> &mut Self {

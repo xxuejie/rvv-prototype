@@ -1,4 +1,5 @@
 use super::{constants::*, gfp::Gfp, gfp2::Gfp2, macros::gfp_ops_impl};
+use core::mem::MaybeUninit;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -109,11 +110,27 @@ impl Gfp6 {
         self
     }
 
+    pub fn add_to(a: &Gfp6, b: &Gfp6) -> Self {
+        let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
+        r.0[0] = a.x() + b.x();
+        r.0[1] = a.y() + b.y();
+        r.0[2] = a.z() + b.z();
+        r
+    }
+
     pub fn sub_ref(&mut self, b: &Gfp6) -> &mut Self {
         self.0[0] -= b.x();
         self.0[1] -= b.y();
         self.0[2] -= b.z();
         self
+    }
+
+    pub fn sub_to(a: &Gfp6, b: &Gfp6) -> Self {
+        let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
+        r.0[0] = a.x() - b.x();
+        r.0[1] = a.y() - b.y();
+        r.0[2] = a.z() - b.z();
+        r
     }
 
     pub fn mul_ref(&mut self, b: &Gfp6) -> &mut Self {
@@ -145,6 +162,38 @@ impl Gfp6 {
         self.set_y(&ty);
         self.set_z(&tz);
         self
+    }
+
+    pub fn mul_to(a: &Gfp6, b: &Gfp6) -> Self {
+        let v0 = a.z() * b.z();
+        let v1 = a.y() * b.y();
+        let v2 = a.x() * b.x();
+
+        let mut t0 = a.x() + a.y();
+        let mut t1 = b.x() + b.y();
+        let mut tz = (&t0) * (&t1);
+        tz.sub_ref(&v1).sub_ref(&v2).mul_xi().add_ref(&v0);
+
+        t0.set(a.y());
+        t0 += a.z();
+        t1.set(b.y());
+        t1 += b.z();
+        let mut ty = (&t0) * (&t1);
+        t0.set(&v2).mul_xi();
+        ty.sub_ref(&v0).sub_ref(&v1).add_ref(&t0);
+
+        t0.set(a.x());
+        t0 += a.z();
+        t1.set(b.x());
+        t1 += b.z();
+        let mut tx = (&t0) * (&t1);
+        tx.sub_ref(&v0).add_ref(&v1).sub_ref(&v2);
+
+        let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
+        r.set_x(&tx);
+        r.set_y(&ty);
+        r.set_z(&tz);
+        r
     }
 
     pub fn mul_scalar(&mut self, b: &Gfp2) -> &mut Self {
