@@ -80,6 +80,10 @@ impl Gfp12 {
         self
     }
 
+    pub fn neg_to(&self) -> Self {
+        Self([self.x().neg_to(), self.y().neg_to()])
+    }
+
     pub fn frobenius(&mut self) -> &mut Self {
         self.x_mut()
             .frobenius()
@@ -131,14 +135,11 @@ impl Gfp12 {
     }
 
     pub fn mul_ref(&mut self, b: &Gfp12) -> &mut Self {
-        let mut tx = self.x().clone();
-        tx.mul_ref(b.y());
-        let mut t = b.x().clone();
-        t.mul_ref(self.y());
+        let mut tx = self.x() * b.y();
+        let mut t = b.x() * self.y();
         tx.add_ref(&t);
 
-        let mut ty = self.y().clone();
-        ty.mul_ref(b.y());
+        let ty = self.y() * b.y();
         t.set(self.x()).mul_ref(b.x()).mul_tau();
 
         self.0[0].set(&tx);
@@ -148,14 +149,11 @@ impl Gfp12 {
     }
 
     pub fn mul_to(a: &Gfp12, b: &Gfp12) -> Self {
-        let mut tx = a.x().clone();
-        tx.mul_ref(b.y());
-        let mut t = b.x().clone();
-        t.mul_ref(a.y());
+        let mut tx = a.x() * b.y();
+        let mut t = b.x() * a.y();
         tx.add_ref(&t);
 
-        let mut ty = a.y().clone();
-        ty.mul_ref(b.y());
+        let ty = a.y() * b.y();
         t.set(a.x()).mul_ref(b.x()).mul_tau();
 
         let mut r: Gfp12 = unsafe { MaybeUninit::uninit().assume_init() };
@@ -206,10 +204,8 @@ impl Gfp12 {
     }
 
     pub fn invert(&mut self) -> &mut Self {
-        let mut t1 = self.x().clone();
-        t1.square();
-        let mut t2 = self.y().clone();
-        t2.square();
+        let mut t1 = self.x().square_to();
+        let mut t2 = self.y().square_to();
 
         t1.mul_tau();
         t2.sub_ref(&t1);

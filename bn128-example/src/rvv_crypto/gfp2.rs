@@ -85,6 +85,12 @@ impl Gfp2 {
         self
     }
 
+    pub fn neg_to(&self) -> Self {
+        let mut r: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::neg_to(&self.0, &mut r.0);
+        r
+    }
+
     pub fn add_ref(&mut self, b: &Gfp2) -> &mut Self {
         gfp::add_mov(&mut self.0, &b.0);
         self
@@ -133,41 +139,48 @@ impl Gfp2 {
     }
 
     pub fn mul_xi(&mut self) -> &mut Self {
-        // tx is kept in self, a is kept in orig
-        let orig = self.clone();
-        gfp::add_mov(&mut self.0, &orig.0);
-        gfp::double(&mut self.0);
-        gfp::double(&mut self.0);
-        gfp::add_mov(&mut self.0, &orig.0);
-        let [x, y] = orig.0;
-        self.0[0] += y;
-        self.0[1] -= x;
+        *self = self.mul_xi_to();
         self
     }
 
+    pub fn mul_xi_to(&self) -> Self {
+        let mut t: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::double_to(&self.0, &mut t.0);
+        gfp::double(&mut t.0);
+        gfp::double(&mut t.0);
+        gfp::add_mov(&mut t.0, &self.0);
+        gfp::add_mov(&mut t.0[0..1], &self.0[1..2]);
+        gfp::sub_mov(&mut t.0[1..2], &self.0[0..1]);
+        t
+    }
+
     pub fn square(&mut self) -> &mut Self {
-        // tx = y
-        let mut tx = [self.y().clone()];
-        // ty = x
-        let mut ty = [self.x().clone()];
+        *self = self.square_to();
+        self
+    }
+
+    pub fn square_to(&self) -> Self {
+        let mut tx: [Gfp; 1] = unsafe { MaybeUninit::uninit().assume_init() };
+        let mut ty: [Gfp; 1] = unsafe { MaybeUninit::uninit().assume_init() };
         // tx = y - x
-        gfp::sub_mov(&mut tx, self.x_slice());
+        gfp::sub(self.y_slice(), self.x_slice(), &mut tx);
         // ty = x + y
-        gfp::add_mov(&mut ty, self.y_slice());
+        gfp::add(self.x_slice(), self.y_slice(), &mut ty);
         // ty = (y - x)(x + y)
         gfp::mul_mov(&mut ty, &tx);
         // tx = x * y
         gfp::mul(self.x_slice(), self.y_slice(), &mut tx);
         // tx = 2 * x * y
         gfp::double(&mut tx);
-        self.set_x(&tx[0]);
-        self.set_y(&ty[0]);
-        self
+
+        let [tx] = tx;
+        let [ty] = ty;
+        Gfp2([tx, ty])
     }
 
     pub fn invert(&mut self) -> &mut Self {
-        let mut t = self.clone();
-        gfp::square(&mut t.0);
+        let mut t: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::square_to(&self.0, &mut t.0);
         let [mut t1, t2] = t.0;
         t1 = t1 + t2;
         t1.invert();

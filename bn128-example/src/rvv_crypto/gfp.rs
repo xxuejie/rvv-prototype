@@ -156,6 +156,9 @@ impl SubAssign for Gfp {
     }
 }
 
+// TODO: unify pairs like mul_mov/mul, square/square_to, double/double_to, neg/neg_to,
+// it might require some unsafe code but it would save us a few traces.
+
 /// WARNING: all functions involving inline rvv assembly must explicitly be
 /// marked with `#[inlnie(never)]`!!!!!!!
 /// We have noticed errors when multiple functions here are called together,
@@ -300,6 +303,77 @@ pub fn square(dst: &mut [Gfp]) {
             len = in (reg) dst.len(),
             np = in (reg) NP.as_ptr(),
             p2 = in (reg) P2.as_ptr(),
+            dst = in (reg) dst.as_ptr(),
+        );
+    }
+}
+
+#[inline(never)]
+pub fn square_to(src: &[Gfp], dst: &mut [Gfp]) {
+    unsafe {
+        // 4 registers as a group, that gives us 8 free v registers to use
+        // t1: vl
+        // t2: remaining element length
+        // t3: source address variable
+        // t4: destination address variable
+        // t5: free variable
+        // Only v0, v4, v8, v16, v24 and v28 are used. v8/v16 can be used as
+        // 8-register group, rest are only used as 4-register group
+        rvv_asm!(
+            "mv t2, {len}",
+            "mv t3, {src}",
+            "mv t4, {dst}",
+            "1:",
+            "vsetvli t1, t2, e256, m4",
+            // Load np => v24, p2 => v28
+            "mv t5, {np}",
+            "vlse256.v v24, (t5), x0",
+            "mv t5, {p2}",
+            "vlse256.v v28, (t5), x0",
+            // Load operands
+            "vle256.v v0, (t3)",
+            "vle256.v v4, (t3)",
+            // T = mul(a, b) => v8
+            "vwmulu.vv v8, v0, v4",
+            // Extract T[0..4] => v0
+            "vnsrl.wx v0, v8, x0",
+            // m = halfMul(T[0..4], np) => v4
+            "vmul.vv v4, v0, v24",
+            // t = mul(m, p2)=> v16
+            "vwmulu.vv v16, v4, v28",
+            // c = t + T = > v8, with carry in v0
+            // Temporarily enlarging vlen to deal with bigger adds
+            "vsetvli t1, t1, e512, m4",
+            "vmadc.vv v0, v8, v16",
+            "vadd.vv v8, v8, v16",
+            "vsetvli t1, t1, e256, m4",
+            // Extract c[4..8] => v4
+            "li t5, 256",
+            "vnsrl.wx v4, v8, t5",
+            // gfpCarry using v4 in c[4..8], with carry in v0
+            // c[4..8] - p2 => v16, with carry in v8
+            "vmsbc.vv v8, v4, v28",
+            "vsub.vv v16, v4, v28",
+            // Combine carries
+            "vmandnot.mm v0, v8, v0",
+            // Select value, if carry is 1, use value in v4, otherwise use value in v16
+            "vmerge.vvm v4, v16, v4, v0",
+            // Store result
+            "vse256.v v4, (t4)",
+            // Update t2/t3/t4, start the next loop if required, t2 contains the count
+            // of elements, so we do substraction using value in t1 directly.
+            "sub t2, t2, t1",
+            // t3/t4, on the other hand, stores the address, we will need to consider
+            // element length asl well. A single element is 32 bytes, a shift left
+            // by 5 on t1 will do the task
+            "slli t1, t1, 5",
+            "add t3, t3, t1",
+            "add t4, t4, t1",
+            "blt x0, t2, 1b",
+            len = in (reg) dst.len(),
+            np = in (reg) NP.as_ptr(),
+            p2 = in (reg) P2.as_ptr(),
+            src = in (reg) src.as_ptr(),
             dst = in (reg) dst.as_ptr(),
         );
     }
@@ -484,6 +558,62 @@ pub fn double(dst: &mut [Gfp]) {
 }
 
 #[inline(never)]
+pub fn double_to(src: &[Gfp], dst: &mut [Gfp]) {
+    unsafe {
+        // 8 registers as a group since add is simple and can do with less
+        // registers
+        // t1: vl
+        // t2: remaining element length
+        // t3: source address variable
+        // t4: destination address variable
+        // t5: free variable
+        // v0, v8, v16, v24 are used.
+        rvv_asm!(
+            "mv t2, {len}",
+            "mv t3, {src}",
+            "mv t4, {dst}",
+            "1:",
+            "vsetvli t1, t2, e256, m8",
+            // Load operands
+            "vle256.v v8, (t3)",
+            "vle256.v v16, (t3)",
+            // Add operands together
+            // c = a + b => v8, with carry in v0
+            "vmadc.vv v0, v8, v16",
+            "vadd.vv v8, v8, v16",
+            // gfpCarry on c
+            // Load p2 into v24
+            "mv t5, {p2}",
+            "vlse256.v v24, (t5), x0",
+            // c - p2 => v24, with carry in v16
+            "vmsbc.vv v16, v8, v24",
+            "vsub.vv v24, v8, v24",
+            // Combine carries
+            "vmandnot.mm v0, v16, v0",
+            // Select value, if carry is 1, use value in v8 (c),
+            // otherwise use value in v24 (c - p2)
+            "vmerge.vvm v8, v24, v8, v0",
+            // Store result
+            "vse256.v v8, (t4)",
+            // Update t2/t3, start the next loop if required, t2 contains the count
+            // of elements, so we do substraction using value in t1 directly.
+            "sub t2, t2, t1",
+            // t3/t4, on the other hand, stores the address, we will need to consider
+            // element length asl well. A single element is 32 bytes, a shift left
+            // by 5 on t1 will do the task
+            "slli t1, t1, 5",
+            "add t3, t3, t1",
+            "add t4, t4, t1",
+            "blt x0, t2, 1b",
+            len = in (reg) dst.len(),
+            p2 = in (reg) P2.as_ptr(),
+            dst = in (reg) dst.as_ptr(),
+            src = in (reg) src.as_ptr(),
+        );
+    }
+}
+
+#[inline(never)]
 pub fn sub_mov(dst: &mut [Gfp], src: &[Gfp]) {
     debug_assert_eq!(dst.len(), src.len());
 
@@ -582,6 +712,60 @@ pub fn neg(dst: &mut [Gfp]) {
             len = in (reg) dst.len(),
             p2 = in (reg) P2.as_ptr(),
             dst = in (reg) dst.as_ptr(),
+        );
+    }
+}
+
+#[inline(never)]
+pub fn neg_to(src: &[Gfp], dst: &mut [Gfp]) {
+    unsafe {
+        // 8 registers as a group since add is simple and can do with less
+        // registers
+        // t1: vl
+        // t2: remaining element length
+        // t3: source address variable
+        // t4: destination address variable
+        // t5: free variable
+        // v0, v8, v16, v24 are used.
+        rvv_asm!(
+            "mv t2, {len}",
+            "mv t3, {src}",
+            "mv t4, {dst}",
+            "1:",
+            "vsetvli t1, t2, e256, m8",
+            // Load p2 into v24
+            "mv t5, {p2}",
+            "vlse256.v v24, (t5), x0",
+            // Load operand d into v8
+            "vle256.v v8, (t3)",
+            // c = p2 - d => v16, carry is cleared in v0
+            "vsub.vv v16, v24, v8",
+            "vmxor.mm v0, v0, v0",
+            // gfpCarry on c with carry
+            // c - p2 => v24, with carry in v8
+            "vmsbc.vv v8, v16, v24",
+            "vsub.vv v24, v16, v24",
+            // Combine carries
+            "vmandnot.mm v0, v8, v0",
+            // Select value, if carry is 1, use value in v16 (c),
+            // otherwise use value in v24 (c - p2)
+            "vmerge.vvm v8, v24, v16, v0",
+            // Store result
+            "vse256.v v8, (t4)",
+            // Update t2/t3/t4, start the next loop if required, t2 contains the count
+            // of elements, so we do substraction using value in t1 directly.
+            "sub t2, t2, t1",
+            // t3/t4, on the other hand, stores the address, we will need to consider
+            // element length asl well. A single element is 32 bytes, a shift left
+            // by 5 on t1 will do the task
+            "slli t1, t1, 5",
+            "add t3, t3, t1",
+            "add t4, t4, t1",
+            "blt x0, t2, 1b",
+            len = in (reg) dst.len(),
+            p2 = in (reg) P2.as_ptr(),
+            dst = in (reg) dst.as_ptr(),
+            src = in (reg) src.as_ptr(),
         );
     }
 }

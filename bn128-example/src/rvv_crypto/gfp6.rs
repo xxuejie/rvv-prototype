@@ -81,6 +81,10 @@ impl Gfp6 {
         self
     }
 
+    pub fn neg_to(&self) -> Self {
+        Self([self.x().neg_to(), self.y().neg_to(), self.x().neg_to()])
+    }
+
     pub fn frobenius(&mut self) -> &mut Self {
         self.x_mut().conjugate();
         self.y_mut().conjugate();
@@ -210,9 +214,9 @@ impl Gfp6 {
         self
     }
 
+    // This is actually slower when converting to the mul_tau_to version
     pub fn mul_tau(&mut self) -> &mut Self {
-        let mut tz = self.x().clone();
-        tz.mul_xi();
+        let tz = self.x().mul_xi_to();
 
         self.0[0].set(&self.y().clone());
         self.0[1].set(&self.z().clone());
@@ -221,45 +225,42 @@ impl Gfp6 {
     }
 
     pub fn square(&mut self) -> &mut Self {
-        let mut v0 = self.z().clone();
-        v0.square();
-        let mut v1 = self.y().clone();
-        v1.square();
-        let mut v2 = self.x().clone();
-        v2.square();
+        *self = self.square_to();
+        self
+    }
+
+    pub fn square_to(&self) -> Self {
+        let v0 = self.z().square_to();
+        let v1 = self.y().square_to();
+        let v2 = self.x().square_to();
 
         let mut c0 = self.x() + self.y();
         c0.square().sub_ref(&v1).sub_ref(&v2).mul_xi().add_ref(&v0);
 
         let mut c1 = self.y() + self.z();
         c1.square().sub_ref(&v0).sub_ref(&v1);
-        let mut xi_v2 = v2.clone();
-        xi_v2.mul_xi();
+        let xi_v2 = v2.mul_xi_to();
         c1.add_ref(&xi_v2);
 
         let mut c2 = self.x() + self.z();
         c2.square().sub_ref(&v0).add_ref(&v1).sub_ref(&v2);
 
-        self.set_x(&c2);
-        self.set_y(&c1);
-        self.set_z(&c0);
-        self
+        Gfp6([c2, c1, c0])
     }
 
     pub fn invert(&mut self) -> &mut Self {
         let mut t1 = self.x() * self.y();
         t1.mul_xi();
 
-        let mut a = self.z().clone();
-        a.square().sub_ref(&t1);
+        let mut a = self.z().square_to();
+        a.sub_ref(&t1);
 
-        let mut b = self.x().clone();
-        b.square().mul_xi();
+        let mut b = self.x().square_to();
+        b.mul_xi();
         t1 = self.y() * self.z();
         b.sub_ref(&t1);
 
-        let mut c = self.y().clone();
-        c.square();
+        let mut c = self.y().square_to();
         t1 = self.x() * self.z();
         c.sub_ref(&t1);
 

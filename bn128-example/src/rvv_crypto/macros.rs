@@ -65,9 +65,7 @@ macro_rules! gfp_ops_impl {
             type Output = $name;
 
             fn neg(self) -> $name {
-                let mut r = self.clone();
-                r.neg_ref();
-                r
+                self.neg_to()
             }
         }
 
