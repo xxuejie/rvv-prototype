@@ -15,6 +15,7 @@ pub fn entry() {
     test_memory_alignments();
     test_constants();
     test_miller_mulline2();
+    test_mul_by_byte_index();
     // TODO: revise those tests later based on ethereum specific curves
     // test_multi_batch_gfp_mul();
     // test_gfp_mul_with_carry();
@@ -4904,4 +4905,47 @@ pub fn test_miller_mulline2() {
             ])
         ]),
     );
+}
+
+pub fn test_mul_by_byte_index() {
+    let a = [
+        gfp::Gfp([
+            4362055564336717965,
+            13801727454249533751,
+            822472346206711817,
+            3325233372571011755,
+        ]),
+        gfp::Gfp([
+            550565505123631353,
+            1579490179292555686,
+            10267959845508557254,
+            1468567417667078976,
+        ]),
+    ];
+    let b = [
+        gfp::Gfp([
+            6992634680654879632,
+            13842097528383178283,
+            3799152378397697967,
+            1207422067652171580,
+        ]),
+        gfp::Gfp([
+            2629081260665339645,
+            9500083259958016262,
+            1018327784856016437,
+            3106202720363406595,
+        ]),
+    ];
+
+    let mut c: [gfp::Gfp; 4] = Default::default();
+
+    let a_index = [0, 0, 32, 32];
+    let b_index = [0, 32, 0, 32];
+
+    gfp::mul_by_byte_index(&a, &b, &a_index, &b_index, &mut c);
+
+    assert_eq!(c[0], a[0].clone() * b[0].clone());
+    assert_eq!(c[1], a[0].clone() * b[1].clone());
+    assert_eq!(c[2], a[1].clone() * b[0].clone());
+    assert_eq!(c[3], a[1].clone() * b[1].clone());
 }

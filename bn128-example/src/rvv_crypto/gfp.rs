@@ -716,6 +716,92 @@ pub fn mul(a: &[Gfp], b: &[Gfp], c: &mut [Gfp]) {
 }
 
 #[inline(never)]
+pub fn mul_by_byte_index(a: &[Gfp], b: &[Gfp], a_index: &[u8], b_index: &[u8], c: &mut [Gfp]) {
+    debug_assert_eq!(a_index.len(), b_index.len());
+    debug_assert_eq!(b_index.len(), c.len());
+
+    unsafe {
+        // 4 registers as a group, that gives us 8 free v registers to use
+        // t1: vl
+        // t2: remaining element length
+        // t3/t4: source address variables
+        // t5: free variable
+        // t6: destination variable
+        // Only v0, v4, v8, v16, v24 and v28 are used. v8/v16 can be used as
+        // 8-register group, rest are only used as 4-register group
+        rvv_asm!(
+            "mv t2, {len}",
+            "mv t3, {a_index}",
+            "mv t4, {b_index}",
+            "mv t6, {c}",
+            "1:",
+            "vsetvli t1, t2, e256, m4",
+            // Load operand indices
+            "vle8.v v24, (t3)",
+            "vle8.v v28, (t4)",
+            // Load actual operands
+            "mv t5, {a}",
+            "vluxei8.v v0, (t5), v24",
+            "mv t5, {b}",
+            "vluxei8.v v4, (t5), v28",
+            // Load np => v24, p2 => v28
+            "mv t5, {np}",
+            "vlse256.v v24, (t5), x0",
+            "mv t5, {p2}",
+            "vlse256.v v28, (t5), x0",
+            // T = mul(a, b) => v8
+            "vwmulu.vv v8, v0, v4",
+            // Extract T[0..4] => v0
+            "vnsrl.wx v0, v8, x0",
+            // m = halfMul(T[0..4], np) => v4
+            "vmul.vv v4, v0, v24",
+            // t = mul(m, p2)=> v16
+            "vwmulu.vv v16, v4, v28",
+            // c = t + T = > v8, with carry in v0
+            // Temporarily enlarging vlen to deal with bigger adds
+            "vsetvli t1, t1, e512, m4",
+            "vmadc.vv v0, v8, v16",
+            "vadd.vv v8, v8, v16",
+            "vsetvli t1, t1, e256, m4",
+            // Extract c[4..8] => v4
+            "li t5, 256",
+            "vnsrl.wx v4, v8, t5",
+            // gfpCarry using v4 in c[4..8], with carry in v0
+            // c[4..8] - p2 => v16, with carry in v8
+            "vmsbc.vv v8, v4, v28",
+            "vsub.vv v16, v4, v28",
+            // Combine carries
+            "vmandnot.mm v0, v8, v0",
+            // Select value, if carry is 1, use value in v4, otherwise use value in v16
+            "vmerge.vvm v4, v16, v4, v0",
+            // Store result
+            "vse256.v v4, (t6)",
+            // Update t2/t3/t4, start the next loop if required, t2 contains the count
+            // of elements, so we do substraction using value in t1 directly.
+            // t3 and t4 here stores byte-sized indices, which can be treated the same
+            // way as count of elements.
+            "sub t2, t2, t1",
+            "add t3, t3, t1",
+            "add t4, t4, t1",
+            // t5 stores the address for result values, we will need to consider
+            // element length as well. A single element is 32 bytes, a shift left
+            // by 5 on t1 will do the task
+            "slli t1, t1, 5",
+            "add t6, t6, t1",
+            "blt x0, t2, 1b",
+            len = in (reg) c.len(),
+            np = in (reg) NP.as_ptr(),
+            p2 = in (reg) P2.as_ptr(),
+            a = in (reg) a.as_ptr(),
+            b = in (reg) b.as_ptr(),
+            c = in (reg) c.as_ptr(),
+            a_index = in (reg) a_index.as_ptr(),
+            b_index = in (reg) b_index.as_ptr(),
+        );
+    }
+}
+
+#[inline(never)]
 pub fn add(a: &[Gfp], b: &[Gfp], c: &mut [Gfp]) {
     debug_assert_eq!(a.len(), b.len());
     debug_assert_eq!(b.len(), c.len());

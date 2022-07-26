@@ -4,6 +4,9 @@ use super::{
 };
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+const MUL_A_INDEX: [u8; 4] = [0, 32, 32, 0];
+const MUL_B_INDEX: [u8; 4] = [32, 0, 32, 0];
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Gfp2(pub [Gfp; 2]);
 
@@ -92,13 +95,11 @@ impl Gfp2 {
     }
 
     pub fn mul_ref(&mut self, b: &Gfp2) -> &mut Self {
-        let mut tx_t = [self.0[1].clone(), self.0[0].clone()];
-        gfp::mul_mov(&mut tx_t, &b.0);
-        gfp::mul_mov(&mut self.0, &b.0);
+        let mut tx_t1_ty_t2: [Gfp; 4] = Default::default();
+        gfp::mul_by_byte_index(&self.0, &b.0, &MUL_A_INDEX, &MUL_B_INDEX, &mut tx_t1_ty_t2);
 
-        self.0[1] -= self.0[0].clone();
-        let [tx1, tx2] = tx_t;
-        self.0[0] = tx1 + tx2;
+        gfp::add(&tx_t1_ty_t2[0..1], &tx_t1_ty_t2[1..2], &mut self.0[0..1]);
+        gfp::sub(&tx_t1_ty_t2[2..3], &tx_t1_ty_t2[3..4], &mut self.0[1..2]);
         self
     }
 
