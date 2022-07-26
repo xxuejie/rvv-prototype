@@ -207,6 +207,10 @@ impl Gfp6 {
         self
     }
 
+    pub fn mul_scalar_to(&self, b: &Gfp2) -> Self {
+        Self([self.x() * b, self.y() * b, self.z() * b])
+    }
+
     pub fn mul_gfp(&mut self, b: &Gfp) -> &mut Self {
         self.x_mut().mul_scalar(b);
         self.y_mut().mul_scalar(b);

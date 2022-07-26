@@ -20,8 +20,7 @@ pub fn miller(mut a_affine: TwistPoint, mut b_affine: CurvePoint) -> Gfp12 {
 
     let mut r = a_affine.clone();
 
-    let mut r2 = a_affine.y().clone();
-    r2.square();
+    let mut r2 = a_affine.y().square_to();
 
     for i in (1..SIX_U_PLUS2_NAF.len()).rev() {
         let (mut a, mut b, mut c, mut new_r) = line_function_double(&r, &b_affine);
@@ -101,8 +100,7 @@ pub(crate) fn line_function_add(
     dd.square().sub_ref(r2).sub_ref(r.t()).mul_ref(r.t());
 
     let hh = &bb - r.x();
-    let mut ii = hh.clone();
-    ii.square();
+    let ii = hh.square_to();
 
     let mut ee = &ii + &ii;
     ee = &ee + &ee;
@@ -137,8 +135,8 @@ pub(crate) fn line_function_add(
     t2 = &t2 + &t2;
     r_out.y_mut().set(&t).sub_ref(&t2);
 
-    let r_out_z = r_out.z().clone();
-    r_out.t_mut().set(&r_out_z).square();
+    let r_out_z_squared = r_out.z().square_to();
+    r_out.t_mut().set(&r_out_z_squared);
 
     t.set(p.y())
         .add_ref(r_out.z())
@@ -150,8 +148,7 @@ pub(crate) fn line_function_add(
     t2 = &t2 + &t2;
     let a = &t2 - &t;
 
-    let mut c = r_out.z().clone();
-    c.mul_scalar(q.y());
+    let mut c = r_out.z().mul_scalar_to(q.y());
     c = &c + &c;
 
     let mut b = -l1;
@@ -165,12 +162,9 @@ pub(crate) fn line_function_double(
     r: &TwistPoint,
     q: &CurvePoint,
 ) -> (Gfp2, Gfp2, Gfp2, TwistPoint) {
-    let mut aa = r.x().clone();
-    aa.square();
-    let mut bb = r.y().clone();
-    bb.square();
-    let mut cc = bb.clone();
-    cc.square();
+    let aa = r.x().square_to();
+    let bb = r.y().square_to();
+    let cc = bb.square_to();
 
     let mut dd = r.x() + &bb;
     dd.square().sub_ref(&aa).sub_ref(&cc);
@@ -179,8 +173,7 @@ pub(crate) fn line_function_double(
     let mut ee = &aa + &aa;
     ee.add_ref(&aa);
 
-    let mut gg = ee.clone();
-    gg.square();
+    let gg = ee.square_to();
 
     let mut r_out = TwistPoint::default();
     r_out.x_mut().set(&gg).sub_ref(&dd).sub_ref(&dd);
@@ -200,8 +193,8 @@ pub(crate) fn line_function_double(
     t = &t + &t;
     r_out.y_mut().sub_ref(&t);
 
-    let r_out_z = r_out.z().clone();
-    r_out.t_mut().set(&r_out_z).square();
+    let r_out_z_squared = r_out.z().square_to();
+    r_out.t_mut().set(&r_out_z_squared);
 
     t = &ee * r.t();
     t = &t + &t;
@@ -226,8 +219,7 @@ pub(crate) fn mul_line(a: &Gfp2, b: &Gfp2, c: &Gfp2, ret: &mut Gfp12) {
     a2.set_y(a);
     a2.set_z(b);
     a2.mul_ref(ret.x());
-    let mut t3 = ret.y().clone();
-    t3.mul_scalar(c);
+    let t3 = ret.y().mul_scalar_to(c);
 
     let t = b + c;
     let mut t2 = Gfp6::default();

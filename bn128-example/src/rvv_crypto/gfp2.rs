@@ -138,6 +138,12 @@ impl Gfp2 {
         self
     }
 
+    pub fn mul_scalar_to(&self, b: &Gfp) -> Self {
+        let mut r: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::mul_scalar(&self.0, b, &mut r.0);
+        r
+    }
+
     pub fn mul_xi(&mut self) -> &mut Self {
         *self = self.mul_xi_to();
         self
