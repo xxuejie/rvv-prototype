@@ -75,12 +75,12 @@ pub fn miller(mut a_affine: TwistPoint, mut b_affine: CurvePoint) -> Gfp12 {
     minus_q2.z_mut().set_one();
     minus_q2.t_mut().set_one();
 
-    r2.set(q1.y()).square();
+    q1.y().square_to_mut(&mut r2);
     let (a, b, c, new_r) = line_function_add(&r, &q1, &b_affine, &r2);
     mul_line(&a, &b, &c, &mut ret);
     r = new_r;
 
-    r2.set(minus_q2.y()).square();
+    minus_q2.y().square_to_mut(&mut r2);
     let (a, b, c, _new_r) = line_function_add(&r, &minus_q2, &b_affine, &r2);
     mul_line(&a, &b, &c, &mut ret);
     // r = new_r;

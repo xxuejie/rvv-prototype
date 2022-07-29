@@ -137,6 +137,13 @@ impl Gfp6 {
         self
     }
 
+    pub fn double(&mut self) -> &mut Self {
+        let dst = gfp2_to_gfp_slice_mut(&mut self.0);
+
+        gfp::double(dst);
+        self
+    }
+
     pub fn add_ref(&mut self, b: &Gfp6) -> &mut Self {
         let dst = gfp2_to_gfp_slice_mut(&mut self.0);
         let src = gfp2_to_gfp_slice(&b.0);
@@ -145,15 +152,18 @@ impl Gfp6 {
         self
     }
 
+    #[inline(always)]
     pub fn add_to(a: &Gfp6, b: &Gfp6) -> Self {
         let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
+        Self::add_to_mut(a, b, &mut r);
+        r
+    }
 
-        let c = gfp2_to_gfp_slice_mut(&mut r.0);
+    pub fn add_to_mut(a: &Gfp6, b: &Gfp6, c: &mut Gfp6) {
+        let c = gfp2_to_gfp_slice_mut(&mut c.0);
         let a = gfp2_to_gfp_slice(&a.0);
         let b = gfp2_to_gfp_slice(&b.0);
         gfp::add(a, b, c);
-
-        r
     }
 
     pub fn sub_ref(&mut self, b: &Gfp6) -> &mut Self {

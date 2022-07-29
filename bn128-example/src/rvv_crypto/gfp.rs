@@ -258,7 +258,7 @@ pub fn mont_decode(dst: &mut [Gfp]) {
 /// A more proper way should be adding memory barriers, until we can find the
 /// correct way for inserting memory barriers, we have to mark then as non-inlinable.
 #[inline(never)]
-fn do_square(src: *const Gfp, dst: *mut Gfp, len: usize) {
+pub fn do_square(src: *const Gfp, dst: *mut Gfp, len: usize) {
     unsafe {
         // 4 registers as a group, that gives us 8 free v registers to use
         // t1: vl
@@ -329,7 +329,7 @@ fn do_square(src: *const Gfp, dst: *mut Gfp, len: usize) {
 }
 
 #[inline(never)]
-fn do_double(src: *const Gfp, dst: *mut Gfp, len: usize) {
+pub fn do_double(src: *const Gfp, dst: *mut Gfp, len: usize) {
     unsafe {
         // 8 registers as a group since add is simple and can do with less
         // registers
@@ -385,7 +385,7 @@ fn do_double(src: *const Gfp, dst: *mut Gfp, len: usize) {
 }
 
 #[inline(never)]
-fn do_neg(src: *const Gfp, dst: *mut Gfp, len: usize) {
+pub fn do_neg(src: *const Gfp, dst: *mut Gfp, len: usize) {
     unsafe {
         // 8 registers as a group since add is simple and can do with less
         // registers
@@ -490,7 +490,7 @@ pub fn normalize(dst: &mut [Gfp]) {
 }
 
 #[inline(never)]
-fn do_mul(a: *const Gfp, b: *const Gfp, c: *mut Gfp, len: usize) {
+pub fn do_mul(a: *const Gfp, b: *const Gfp, c: *mut Gfp, len: usize) {
     unsafe {
         // 4 registers as a group, that gives us 8 free v registers to use
         // t1: vl
@@ -566,7 +566,7 @@ fn do_mul(a: *const Gfp, b: *const Gfp, c: *mut Gfp, len: usize) {
 }
 
 #[inline(never)]
-fn do_mul_scalar(a: *const Gfp, b: &Gfp, c: *mut Gfp, len: usize) {
+pub fn do_mul_scalar(a: *const Gfp, b: &Gfp, c: *mut Gfp, len: usize) {
     unsafe {
         // 4 registers as a group, that gives us 8 free v registers to use
         // t1: vl
@@ -635,6 +635,75 @@ fn do_mul_scalar(a: *const Gfp, b: &Gfp, c: *mut Gfp, len: usize) {
             b = in (reg) b as *const Gfp,
             c = in (reg) c,
             // debug_val = in (reg) debug_val.as_ptr(),
+        );
+    }
+}
+
+#[inline(never)]
+pub fn add_by_byte_index(a: &[Gfp], b: &[Gfp], a_index: &[u8], b_index: &[u8], c: &mut [Gfp]) {
+    debug_assert_eq!(a_index.len(), b_index.len());
+    debug_assert_eq!(b_index.len(), c.len());
+
+    unsafe {
+        // 8 registers as a group since add is simple and can do with less
+        // registers
+        // t1: vl
+        // t2: remaining element length
+        // t3/t4: source address variables
+        // t5: free variable
+        // t6: destination address
+        // v0, v8, v16, v24 are used.
+        rvv_asm!(
+            "mv t2, {len}",
+            "mv t3, {a_index}",
+            "mv t4, {b_index}",
+            "mv t6, {c}",
+            "1:",
+            "vsetvli t1, t2, e256, m8",
+            // Load operand indices
+            "vle8.v v0, (t3)",
+            "vle8.v v24, (t4)",
+            // Load actual operands
+            "mv t5, {a}",
+            "vluxei8.v v8, (t5), v0",
+            "mv t5, {b}",
+            "vluxei8.v v16, (t5), v24",
+            // Add operands together
+            // c = a + b => v8, with carry in v0
+            "vmadc.vv v0, v8, v16",
+            "vadd.vv v8, v8, v16",
+            // gfpCarry on c
+            // Load p2 into v24
+            "mv t5, {p2}",
+            "vlse256.v v24, (t5), x0",
+            // c - p2 => v24, with carry in v16
+            "vmsbc.vv v16, v8, v24",
+            "vsub.vv v24, v8, v24",
+            // Combine carries
+            "vmandnot.mm v0, v16, v0",
+            // Select value, if carry is 1, use value in v8 (c),
+            // otherwise use value in v24 (c - p2)
+            "vmerge.vvm v8, v24, v8, v0",
+            // Store result
+            "vse256.v v8, (t6)",
+            // Update t2/t3/t4, start the next loop if required, t2 contains the count
+            // of elements, so we do substraction using value in t1 directly.
+            "sub t2, t2, t1",
+            "add t3, t3, t1",
+            "add t4, t4, t1",
+            // t6, on the other hand, stores the address, we will need to consider
+            // element length asl well. A single element is 32 bytes, a shift left
+            // by 5 on t1 will do the task
+            "slli t1, t1, 5",
+            "add t6, t6, t1",
+            "blt x0, t2, 1b",
+            len = in (reg) c.len(),
+            p2 = in (reg) P2.as_ptr(),
+            a = in (reg) a.as_ptr(),
+            b = in (reg) b.as_ptr(),
+            c = in (reg) c.as_ptr(),
+            a_index = in (reg) a_index.as_ptr(),
+            b_index = in (reg) b_index.as_ptr(),
         );
     }
 }
@@ -726,7 +795,7 @@ pub fn mul_by_byte_index(a: &[Gfp], b: &[Gfp], a_index: &[u8], b_index: &[u8], c
 }
 
 #[inline(never)]
-fn do_add(a: *const Gfp, b: *const Gfp, c: *mut Gfp, len: usize) {
+pub fn do_add(a: *const Gfp, b: *const Gfp, c: *mut Gfp, len: usize) {
     unsafe {
         // 8 registers as a group since add is simple and can do with less
         // registers
@@ -785,7 +854,7 @@ fn do_add(a: *const Gfp, b: *const Gfp, c: *mut Gfp, len: usize) {
 }
 
 #[inline(never)]
-fn do_sub(a: *const Gfp, b: *const Gfp, c: *mut Gfp, len: usize) {
+pub fn do_sub(a: *const Gfp, b: *const Gfp, c: *mut Gfp, len: usize) {
     unsafe {
         // 8 registers as a group since add is simple and can do with less
         // registers

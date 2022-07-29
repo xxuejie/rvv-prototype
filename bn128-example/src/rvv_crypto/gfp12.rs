@@ -18,7 +18,7 @@ pub struct Gfp12(pub [Gfp6; 2]);
 
 impl Gfp12 {
     pub fn one() -> Self {
-        let mut a = Gfp12::default();
+        let mut a: Self = unsafe { MaybeUninit::uninit().assume_init() };
         a.set_one();
         a
     }
@@ -37,6 +37,22 @@ impl Gfp12 {
 
     pub fn y_mut(&mut self) -> &mut Gfp6 {
         &mut self.0[1]
+    }
+
+    pub fn x_slice_mut(&mut self) -> &mut [Gfp6] {
+        &mut self.0[0..1]
+    }
+
+    pub fn y_slice_mut(&mut self) -> &mut [Gfp6] {
+        &mut self.0[1..2]
+    }
+
+    pub fn x_slice(&mut self) -> &[Gfp6] {
+        &self.0[0..1]
+    }
+
+    pub fn y_slice(&mut self) -> &[Gfp6] {
+        &self.0[1..2]
     }
 
     pub fn set_x(&mut self, x: &Gfp6) -> &mut Self {
@@ -192,12 +208,11 @@ impl Gfp12 {
     }
 
     pub fn exp_to(&self, power: &U256) -> Self {
-        let mut sum = Gfp12::default();
-        sum.set_one();
+        let mut sum = Gfp12::one();
         let mut t = Gfp12::default();
 
         for i in (0..bits(power)).rev() {
-            t.set(&sum).square();
+            sum.square_to_mut(&mut t);
             if power.get_bit(i).unwrap_or(false) {
                 sum.set(&t).mul_ref(self);
             } else {
@@ -215,32 +230,47 @@ impl Gfp12 {
     }
 
     pub fn square(&mut self) -> &mut Self {
-        let v0 = self.x() * self.y();
-
         let mut t = self.x().mul_tau_to();
         t.add_ref(self.y());
-        let mut ty = self.x() + self.y();
-        ty.mul_ref(&t).sub_ref(&v0);
-        t.set(&v0).mul_tau();
-        ty.sub_ref(&t);
+        let v0 = [self.x() * self.y()];
 
-        self.set_x(&v0);
-        self.x_mut().add_ref(&v0);
-        self.set_y(&ty);
+        {
+            gfp::do_add(
+                gfp6_to_gfp_slice(self.x_slice()).as_ptr(),
+                gfp6_to_gfp_slice(self.y_slice()).as_ptr(),
+                gfp6_to_gfp_slice_mut(self.y_slice_mut()).as_mut_ptr(),
+                gfp6_to_gfp_slice_mut(self.y_slice_mut()).len(),
+            );
+        }
+        self.y_mut().mul_ref(&t).sub_ref(&v0[0]);
+        t.set(&v0[0]).mul_tau();
+        self.y_mut().sub_ref(&t);
+
+        {
+            let src = gfp6_to_gfp_slice(&v0);
+            let dst = gfp6_to_gfp_slice_mut(self.x_slice_mut());
+
+            gfp::double_to(src, dst);
+        }
         self
     }
 
-    pub fn square_to(&self) -> Self {
-        let v0 = self.x() * self.y();
-
+    pub fn square_to_mut(&self, target: &mut Self) {
         let mut t = self.x().mul_tau_to();
         t.add_ref(self.y());
-        let mut ty = self.x() + self.y();
-        ty.mul_ref(&t).sub_ref(&v0);
-        t.set(&v0).mul_tau();
-        ty.sub_ref(&t);
+        let v0 = [self.x() * self.y()];
 
-        Gfp12([&v0 + &v0, ty])
+        Gfp6::add_to_mut(self.x(), self.y(), target.y_mut());
+        target.y_mut().mul_ref(&t).sub_ref(&v0[0]);
+        t.set(&v0[0]).mul_tau();
+        target.y_mut().sub_ref(&t);
+
+        {
+            let src = gfp6_to_gfp_slice(&v0);
+            let dst = gfp6_to_gfp_slice_mut(target.x_slice_mut());
+
+            gfp::double_to(src, dst);
+        }
     }
 
     pub fn invert(&mut self) -> &mut Self {
@@ -304,7 +334,8 @@ impl Gfp12 {
         let mut y6 = Self::mul_to(&fu3, &fu3p);
         y6.conjugate();
 
-        let mut t0 = y6.square_to();
+        let mut t0: Gfp12 = unsafe { MaybeUninit::uninit().assume_init() };
+        y6.square_to_mut(&mut t0);
         t0.mul_ref(&y4).mul_ref(&y5);
         t1.set(&y3).mul_ref(&y5).mul_ref(&t0);
         t0.mul_ref(&y2);

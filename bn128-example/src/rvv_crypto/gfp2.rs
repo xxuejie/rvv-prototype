@@ -158,7 +158,14 @@ impl Gfp2 {
     }
 
     pub fn mul_xi(&mut self) -> &mut Self {
-        *self = self.mul_xi_to();
+        let mut t: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::double_to(&self.0, &mut t.0);
+        gfp::double(&mut t.0);
+        gfp::double(&mut t.0);
+        gfp::add_mov(&mut t.0, &self.0);
+        gfp::add_mov(t.x_slice_mut(), self.y_slice());
+        gfp::sub_mov(t.y_slice_mut(), self.x_slice());
+        *self = t;
         self
     }
 
@@ -179,22 +186,27 @@ impl Gfp2 {
     }
 
     pub fn square_to(&self) -> Self {
-        let mut tx: [Gfp; 1] = unsafe { MaybeUninit::uninit().assume_init() };
-        let mut ty: [Gfp; 1] = unsafe { MaybeUninit::uninit().assume_init() };
-        // tx = y - x
-        gfp::sub(self.y_slice(), self.x_slice(), &mut tx);
-        // ty = x + y
-        gfp::add(self.x_slice(), self.y_slice(), &mut ty);
-        // ty = (y - x)(x + y)
-        gfp::mul_mov(&mut ty, &tx);
-        // tx = x * y
-        gfp::mul(self.x_slice(), self.y_slice(), &mut tx);
-        // tx = 2 * x * y
-        gfp::double(&mut tx);
+        let mut t: Gfp2 = unsafe { MaybeUninit::uninit().assume_init() };
+        self.square_to_mut(&mut t);
+        t
+    }
 
-        let [tx] = tx;
-        let [ty] = ty;
-        Gfp2([tx, ty])
+    pub fn square_to_mut(&self, t: &mut Gfp2) {
+        // tx = y - x
+        gfp::sub(self.y_slice(), self.x_slice(), t.x_slice_mut());
+        // ty = x + y
+        gfp::add(self.x_slice(), self.y_slice(), t.y_slice_mut());
+        // ty = (y - x)(x + y)
+        gfp::do_mul(
+            t.y_slice().as_ptr(),
+            t.x_slice().as_ptr(),
+            t.y_slice_mut().as_mut_ptr(),
+            t.y_slice_mut().len(),
+        );
+        // tx = x * y
+        gfp::mul(self.x_slice(), self.y_slice(), t.x_slice_mut());
+        // tx = 2 * x * y
+        gfp::double(&mut t.x_slice_mut());
     }
 
     pub fn invert(&mut self) -> &mut Self {
