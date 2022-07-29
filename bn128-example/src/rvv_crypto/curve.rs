@@ -3,6 +3,7 @@ use super::{
     Error,
 };
 use core::convert::{TryFrom, TryInto};
+use core::mem::MaybeUninit;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CurvePoint(pub [Gfp; 4]);
@@ -174,10 +175,10 @@ impl CurvePoint {
             return true;
         }
 
-        let mut y2 = [self.y().clone()];
-        gfp::mul_mov(&mut y2, self.y_slice());
-        let mut x3 = [self.x().clone()];
-        gfp::mul_mov(&mut x3, self.x_slice());
+        let mut y2: [Gfp; 1] = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::mul(self.y_slice(), self.y_slice(), &mut y2);
+        let mut x3: [Gfp; 1] = unsafe { MaybeUninit::uninit().assume_init() };
+        gfp::mul(self.x_slice(), self.x_slice(), &mut x3);
         gfp::mul_mov(&mut x3, self.x_slice());
         gfp::add_mov(&mut x3, &CURVE_B);
 
@@ -203,8 +204,7 @@ impl CurvePoint {
             return self.set_x(&gfp::ZERO).set_y(&gfp::ONE).set_t(&gfp::ZERO);
         }
 
-        let mut z_inv = [self.z().clone()];
-        z_inv[0].invert();
+        let z_inv = [self.z().invert_to()];
 
         let mut t = [Gfp::default()];
         gfp::mul(self.y_slice(), &z_inv, &mut t);

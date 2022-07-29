@@ -61,6 +61,10 @@ impl Gfp2 {
         self
     }
 
+    pub fn zero() -> Self {
+        Gfp2([gfp::ZERO, gfp::ZERO])
+    }
+
     pub fn set_one(&mut self) -> &mut Self {
         self.set_x(&gfp::ZERO);
         self.set_y(&gfp::ONE);

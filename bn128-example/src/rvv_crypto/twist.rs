@@ -210,10 +210,9 @@ impl TwistPoint {
             return true;
         }
 
-        let mut y2 = self.y().clone();
-        y2.square();
-        let mut x3 = self.x().clone();
-        x3.square().mul_ref(self.x()).add_ref(&TWIST_B);
+        let y2 = self.y().square_to();
+        let mut x3 = self.x().square_to();
+        x3.mul_ref(self.x()).add_ref(&TWIST_B);
 
         y2 == x3
     }
@@ -242,10 +241,8 @@ impl TwistPoint {
 
         let mut z_inv = self.z().clone();
         z_inv.invert();
-        let mut t = self.y().clone();
-        t.mul_ref(&z_inv);
-        let mut z_inv2 = z_inv.clone();
-        z_inv2.square();
+        let mut t = self.y() * &z_inv;
+        let z_inv2 = z_inv.square_to();
         self.y_mut().set(&t).mul_ref(&z_inv2);
         t.set(self.x()).mul_ref(&z_inv2);
         self.x_mut().set(&t);
@@ -259,26 +256,30 @@ impl TwistPoint {
         self.t_mut().set_zero();
         self
     }
+
+    pub fn neg_to(&self) -> Self {
+        Self([
+            self.x().clone(),
+            self.y().neg_to(),
+            self.z().clone(),
+            Gfp2::zero(),
+        ])
+    }
 }
 
 pub fn double(a: &TwistPoint, c: &mut TwistPoint) {
-    let mut aa = a.x().clone();
-    aa.square();
-    let mut bb = a.y().clone();
-    bb.square();
-    let mut cc = bb.clone();
-    cc.square();
+    let aa = a.x().square_to();
+    let bb = a.y().square_to();
+    let cc = bb.square_to();
 
     let mut t = a.x() + &bb;
-    let mut t2 = t.clone();
-    t2.square();
+    let mut t2 = t.square_to();
     t.set(&t2).sub_ref(&aa);
     t2.set(&t).sub_ref(&cc);
     let d = (&t2) + (&t2);
     t = (&aa) + (&aa);
     let e = (&t) + (&aa);
-    let mut f = e.clone();
-    f.square();
+    let f = e.square_to();
 
     t = (&d) + (&d);
     c.x_mut().set(&f).sub_ref(&t);
@@ -304,10 +305,8 @@ pub fn add(a: &TwistPoint, b: &TwistPoint, c: &mut TwistPoint) {
         return;
     }
 
-    let mut z12 = a.z().clone();
-    z12.square();
-    let mut z22 = b.z().clone();
-    z22.square();
+    let z12 = a.z().square_to();
+    let z22 = b.z().square_to();
     let u1 = a.x() * &z22;
     let u2 = b.x() * &z12;
 
@@ -321,8 +320,7 @@ pub fn add(a: &TwistPoint, b: &TwistPoint, c: &mut TwistPoint) {
     let x_equal = h.is_zero();
 
     t = &h + &h;
-    let mut i = t.clone();
-    i.square();
+    let i = t.square_to();
     let j = &h * &i;
 
     t = &s2 - &s1;
@@ -335,8 +333,7 @@ pub fn add(a: &TwistPoint, b: &TwistPoint, c: &mut TwistPoint) {
 
     let v = &u1 * &i;
 
-    let mut t4 = r.clone();
-    t4.square();
+    let mut t4 = r.square_to();
     t = &v + &v;
     let mut t6 = &t4 - &j;
     c.x_mut().set(&t6).sub_ref(&t);
@@ -348,8 +345,7 @@ pub fn add(a: &TwistPoint, b: &TwistPoint, c: &mut TwistPoint) {
     c.y_mut().set(&t4).sub_ref(&t6);
 
     t = a.z() + b.z();
-    t4 = t.clone();
-    t4.square();
+    t4 = t.square_to();
     t = &t4 - &z12;
     t4 = t - &z22;
     c.z_mut().set(&t4).mul_ref(&h);

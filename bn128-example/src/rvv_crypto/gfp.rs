@@ -48,6 +48,10 @@ impl Gfp {
 
     // TODO: do we need a parallel version of exp?
     pub fn exp(&mut self, bits: &[u64; 4]) {
+        self.0 = self.exp_to(bits).0;
+    }
+
+    pub fn exp_to(&self, bits: &[u64; 4]) -> Self {
         let mut sum = [Gfp(RN1)];
         let mut power = [self.clone()];
 
@@ -60,11 +64,16 @@ impl Gfp {
             }
         }
         mul_mov_scalar(&mut sum, &Gfp(R3));
-        self.0 = sum[0].0;
+        let [a] = sum;
+        a
     }
 
     pub fn invert(&mut self) {
         self.exp(&P_MINUS2)
+    }
+
+    pub fn invert_to(&self) -> Self {
+        self.exp_to(&P_MINUS2)
     }
 
     pub fn new_from_int64(x: i64) -> Self {
