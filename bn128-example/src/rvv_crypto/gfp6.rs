@@ -142,61 +142,67 @@ impl Gfp6 {
         let v1 = self.y() * b.y();
         let v2 = self.x() * b.x();
 
-        let mut t0 = self.x() + self.y();
-        let mut t1 = b.x() + b.y();
-        let mut tz = (&t0) * (&t1);
-        tz.sub_ref(&v1).sub_ref(&v2).mul_xi().add_ref(&v0);
+        let z = self.z().clone();
+        *self.z_mut() = self.x() + self.y();
+        self.y_mut().add_ref(&z);
+        self.x_mut().add_ref(&z);
 
-        t0.set(self.y());
-        t0 += self.z();
-        t1.set(b.y());
-        t1 += b.z();
-        let mut ty = (&t0) * (&t1);
-        t0.set(&v2).mul_xi();
-        ty.sub_ref(&v0).sub_ref(&v1).add_ref(&t0);
+        let t1_z = b.x() + b.y();
+        let t1_y = b.y() + b.z();
+        let t1_x = b.x() + b.z();
 
-        t0.set(self.x());
-        t0 += self.z();
-        t1.set(b.x());
-        t1 += b.z();
-        let mut tx = (&t0) * (&t1);
-        tx.sub_ref(&v0).add_ref(&v1).sub_ref(&v2);
+        self.z_mut()
+            .mul_ref(&t1_z)
+            .sub_ref(&v1)
+            .sub_ref(&v2)
+            .mul_xi()
+            .add_ref(&v0);
+        self.y_mut()
+            .mul_ref(&t1_y)
+            .sub_ref(&v0)
+            .sub_ref(&v1)
+            .add_ref(&v2.mul_xi_to());
+        self.x_mut()
+            .mul_ref(&t1_x)
+            .sub_ref(&v0)
+            .add_ref(&v1)
+            .sub_ref(&v2);
 
-        self.set_x(&tx);
-        self.set_y(&ty);
-        self.set_z(&tz);
         self
     }
 
     pub fn mul_to(a: &Gfp6, b: &Gfp6) -> Self {
+        let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
+
         let v0 = a.z() * b.z();
         let v1 = a.y() * b.y();
         let v2 = a.x() * b.x();
 
-        let mut t0 = a.x() + a.y();
-        let mut t1 = b.x() + b.y();
-        let mut tz = (&t0) * (&t1);
-        tz.sub_ref(&v1).sub_ref(&v2).mul_xi().add_ref(&v0);
+        let z = a.z().clone();
+        *r.z_mut() = a.x() + a.y();
+        *r.y_mut() = a.y() + &z;
+        *r.x_mut() = a.x() + &z;
 
-        t0.set(a.y());
-        t0 += a.z();
-        t1.set(b.y());
-        t1 += b.z();
-        let mut ty = (&t0) * (&t1);
-        t0.set(&v2).mul_xi();
-        ty.sub_ref(&v0).sub_ref(&v1).add_ref(&t0);
+        let t1_z = b.x() + b.y();
+        let t1_y = b.y() + b.z();
+        let t1_x = b.x() + b.z();
 
-        t0.set(a.x());
-        t0 += a.z();
-        t1.set(b.x());
-        t1 += b.z();
-        let mut tx = (&t0) * (&t1);
-        tx.sub_ref(&v0).add_ref(&v1).sub_ref(&v2);
-
-        let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
-        r.set_x(&tx);
-        r.set_y(&ty);
-        r.set_z(&tz);
+        r.z_mut()
+            .mul_ref(&t1_z)
+            .sub_ref(&v1)
+            .sub_ref(&v2)
+            .mul_xi()
+            .add_ref(&v0);
+        r.y_mut()
+            .mul_ref(&t1_y)
+            .sub_ref(&v0)
+            .sub_ref(&v1)
+            .add_ref(&v2.mul_xi_to());
+        r.x_mut()
+            .mul_ref(&t1_x)
+            .sub_ref(&v0)
+            .add_ref(&v1)
+            .sub_ref(&v2);
         r
     }
 
