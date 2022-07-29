@@ -74,6 +74,10 @@ impl Gfp12 {
         self
     }
 
+    pub fn conjugate_to(&self) -> Self {
+        Gfp12([self.x().neg_to(), self.y().clone()])
+    }
+
     pub fn neg_ref(&mut self) -> &mut Self {
         self.x_mut().neg_ref();
         self.y_mut().neg_ref();
@@ -92,12 +96,25 @@ impl Gfp12 {
         self
     }
 
+    pub fn frobenius_to(&self) -> Self {
+        let mut r = Self([self.x().frobenius_to(), self.y().frobenius_to()]);
+        r.x_mut()
+            .mul_scalar(&constant_to_gfp2(&XI_TO_P_MINUS1_OVER6));
+        r
+    }
+
     pub fn frobenius_p2(&mut self) -> &mut Self {
         self.x_mut()
             .frobenius_p2()
             .mul_gfp(&Gfp(XI_TO_P_SQUARED_MINUS1_OVER6));
         self.y_mut().frobenius_p2();
         self
+    }
+
+    pub fn frobenius_p2_to(&self) -> Self {
+        let mut r = Self([self.x().frobenius_p2_to(), self.y().frobenius_p2_to()]);
+        r.x_mut().mul_gfp(&Gfp(XI_TO_P_SQUARED_MINUS1_OVER6));
+        r
     }
 
     pub fn frobenius_p4(&mut self) -> &mut Self {
@@ -135,30 +152,24 @@ impl Gfp12 {
     }
 
     pub fn mul_ref(&mut self, b: &Gfp12) -> &mut Self {
-        let mut tx = self.x() * b.y();
-        let mut t = b.x() * self.y();
-        tx.add_ref(&t);
+        let t = self.y() * b.x();
+        let mut t2 = self.x() * b.x();
+        t2.mul_tau();
 
-        let ty = self.y() * b.y();
-        t.set(self.x()).mul_ref(b.x()).mul_tau();
-
-        self.0[0].set(&tx);
-        self.0[1].set(&ty);
-        self.0[1].add_ref(&t);
+        self.mul_scalar(b.y());
+        self.x_mut().add_ref(&t);
+        self.y_mut().add_ref(&t2);
         self
     }
 
     pub fn mul_to(a: &Gfp12, b: &Gfp12) -> Self {
-        let mut tx = a.x() * b.y();
-        let mut t = b.x() * a.y();
-        tx.add_ref(&t);
+        let t = a.y() * b.x();
+        let mut t2 = a.x() * b.x();
+        t2.mul_tau();
 
-        let ty = a.y() * b.y();
-        t.set(a.x()).mul_ref(b.x()).mul_tau();
-
-        let mut r: Gfp12 = unsafe { MaybeUninit::uninit().assume_init() };
-        r.0[0] = tx;
-        r.0[1] = &ty + &t;
+        let mut r = a.mul_scalar_to(b.y());
+        r.x_mut().add_ref(&t);
+        r.y_mut().add_ref(&t2);
         r
     }
 
@@ -168,7 +179,11 @@ impl Gfp12 {
         self
     }
 
-    pub fn exp(&mut self, power: &U256) -> &mut Self {
+    pub fn mul_scalar_to(&self, b: &Gfp6) -> Self {
+        Gfp12([Gfp6::mul_to(self.x(), b), Gfp6::mul_to(self.y(), b)])
+    }
+
+    pub fn exp_to(&self, power: &U256) -> Self {
         let mut sum = Gfp12::default();
         sum.set_one();
         let mut t = Gfp12::default();
@@ -182,15 +197,19 @@ impl Gfp12 {
             }
         }
 
-        self.set(&sum);
+        sum
+    }
+
+    #[inline(always)]
+    pub fn exp(&mut self, power: &U256) -> &mut Self {
+        *self = self.exp_to(power);
         self
     }
 
     pub fn square(&mut self) -> &mut Self {
         let v0 = self.x() * self.y();
 
-        let mut t = self.x().clone();
-        t.mul_tau();
+        let mut t = self.x().mul_tau_to();
         t.add_ref(self.y());
         let mut ty = self.x() + self.y();
         ty.mul_ref(&t).sub_ref(&v0);
@@ -201,6 +220,19 @@ impl Gfp12 {
         self.x_mut().add_ref(&v0);
         self.set_y(&ty);
         self
+    }
+
+    pub fn square_to(&self) -> Self {
+        let v0 = self.x() * self.y();
+
+        let mut t = self.x().mul_tau_to();
+        t.add_ref(self.y());
+        let mut ty = self.x() + self.y();
+        ty.mul_ref(&t).sub_ref(&v0);
+        t.set(&v0).mul_tau();
+        ty.sub_ref(&t);
+
+        Gfp12([&v0 + &v0, ty])
     }
 
     pub fn invert(&mut self) -> &mut Self {
@@ -216,60 +248,55 @@ impl Gfp12 {
         self
     }
 
+    pub fn invert_to(&self) -> Self {
+        let mut t1 = self.x().square_to();
+        let mut t2 = self.y().square_to();
+
+        t1.mul_tau();
+        t2.sub_ref(&t1);
+        t2.invert();
+
+        let mut r = Gfp12([self.x().neg_to(), self.y().clone()]);
+        r.mul_scalar(&t2);
+        r
+    }
+
     pub fn final_exponentiation(&mut self) -> &mut Self {
         // p^6-Frobenus
-        let mut t1 = self.clone();
-        t1.x_mut().neg_ref();
+        let mut t1 = Gfp12([self.x().neg_to(), self.y().clone()]);
 
-        let mut inv = self.clone();
-        inv.invert();
+        let inv = self.invert_to();
         t1.mul_ref(&inv);
 
-        let mut t2 = t1.clone();
-        t2.frobenius_p2();
+        let t2 = t1.frobenius_p2_to();
         t1.mul_ref(&t2);
 
-        let mut fp = t1.clone();
-        fp.frobenius();
-        let mut fp2 = t1.clone();
-        fp2.frobenius_p2();
-        let mut fp3 = fp2.clone();
-        fp3.frobenius();
+        let fp = t1.frobenius_to();
+        let fp2 = t1.frobenius_p2_to();
+        let fp3 = fp2.frobenius_to();
 
-        let mut fu = t1.clone();
-        fu.exp(&U.into());
-        let mut fu2 = fu.clone();
-        fu2.exp(&U.into());
-        let mut fu3 = fu2.clone();
-        fu3.exp(&U.into());
+        let fu = t1.exp_to(&U.into());
+        let fu2 = fu.exp_to(&U.into());
+        let fu3 = fu2.exp_to(&U.into());
 
-        let mut y3 = fu.clone();
-        y3.frobenius();
-        let mut fu2p = fu2.clone();
-        fu2p.frobenius();
-        let mut fu3p = fu3.clone();
-        fu3p.frobenius();
-        let mut y2 = fu2.clone();
-        y2.frobenius_p2();
+        let mut y3 = fu.frobenius_to();
+        let fu2p = fu2.frobenius_to();
+        let fu3p = fu3.frobenius_to();
+        let y2 = fu2.frobenius_p2_to();
 
-        let mut y0 = fp.clone();
-        y0.mul_ref(&fp2).mul_ref(&fp3);
+        let mut y0 = &fp * &fp2;
+        y0.mul_ref(&fp3);
 
-        let mut y1 = t1.clone();
-        y1.conjugate();
-        let mut y5 = fu2.clone();
-        y5.conjugate();
+        let y1 = t1.conjugate_to();
+        let y5 = fu2.conjugate_to();
         y3.conjugate();
-        let mut y4 = fu.clone();
-        y4.mul_ref(&fu2p);
+        let mut y4 = &fu * &fu2p;
         y4.conjugate();
 
-        let mut y6 = fu3.clone();
-        y6.mul_ref(&fu3p);
+        let mut y6 = Self::mul_to(&fu3, &fu3p);
         y6.conjugate();
 
-        let mut t0 = y6.clone();
-        t0.square();
+        let mut t0 = y6.square_to();
         t0.mul_ref(&y4).mul_ref(&y5);
         t1.set(&y3).mul_ref(&y5).mul_ref(&t0);
         t0.mul_ref(&y2);

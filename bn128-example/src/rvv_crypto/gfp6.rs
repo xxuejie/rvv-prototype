@@ -82,7 +82,7 @@ impl Gfp6 {
     }
 
     pub fn neg_to(&self) -> Self {
-        Self([self.x().neg_to(), self.y().neg_to(), self.x().neg_to()])
+        Self([self.x().neg_to(), self.y().neg_to(), self.z().neg_to()])
     }
 
     pub fn frobenius(&mut self) -> &mut Self {
@@ -95,10 +95,29 @@ impl Gfp6 {
         self
     }
 
+    pub fn frobenius_to(&self) -> Self {
+        let mut r = Gfp6([
+            self.x().conjugate_to(),
+            self.y().conjugate_to(),
+            self.z().conjugate_to(),
+        ]);
+        r.x_mut().mul_ref(&constant_to_gfp2(&XI_TO_2P_MINUS2_OVER3));
+        r.y_mut().mul_ref(&constant_to_gfp2(&XI_TO_P_MINUS1_OVER3));
+        r
+    }
+
     pub fn frobenius_p2(&mut self) -> &mut Self {
         self.x_mut().mul_scalar(&Gfp(XI_TO_2P_SQUARED_MINUS2_OVER3));
         self.y_mut().mul_scalar(&Gfp(XI_TO_P_SQUARED_MINUS1_OVER3));
         self
+    }
+
+    pub fn frobenius_p2_to(&self) -> Self {
+        Self([
+            self.x().mul_scalar_to(&Gfp(XI_TO_2P_SQUARED_MINUS2_OVER3)),
+            self.y().mul_scalar_to(&Gfp(XI_TO_P_SQUARED_MINUS1_OVER3)),
+            self.z().clone(),
+        ])
     }
 
     pub fn frobenius_p4(&mut self) -> &mut Self {
@@ -224,7 +243,14 @@ impl Gfp6 {
         self
     }
 
-    // This is actually slower when converting to the mul_tau_to version
+    pub fn mul_gfp_to(&self, b: &Gfp) -> Self {
+        Gfp6([
+            self.x().mul_scalar_to(b),
+            self.y().mul_scalar_to(b),
+            self.z().mul_scalar_to(b),
+        ])
+    }
+
     pub fn mul_tau(&mut self) -> &mut Self {
         let tz = self.x().mul_xi_to();
 
@@ -232,6 +258,10 @@ impl Gfp6 {
         self.0[1].set(&self.z().clone());
         self.0[2].set(&tz);
         self
+    }
+
+    pub fn mul_tau_to(&self) -> Self {
+        Gfp6([self.y().clone(), self.z().clone(), self.x().mul_xi_to()])
     }
 
     pub fn square(&mut self) -> &mut Self {
@@ -289,6 +319,35 @@ impl Gfp6 {
         self.set_z(&((&a) * (&f)));
 
         self
+    }
+
+    pub fn invert_to(self) -> Self {
+        let mut t1 = self.x() * self.y();
+        t1.mul_xi();
+
+        let mut a = self.z().square_to();
+        a.sub_ref(&t1);
+
+        let mut b = self.x().square_to();
+        b.mul_xi();
+        t1 = self.y() * self.z();
+        b.sub_ref(&t1);
+
+        let mut c = self.y().square_to();
+        t1 = self.x() * self.z();
+        c.sub_ref(&t1);
+
+        let mut f = (&c) * self.y();
+        f.mul_xi();
+        t1 = (&a) * self.z();
+        f.add_ref(&t1);
+        t1 = (&b) * self.x();
+        t1.mul_xi();
+        f.add_ref(&t1);
+
+        f.invert();
+
+        Gfp6([&c * &f, &b * &f, &a * &f])
     }
 }
 

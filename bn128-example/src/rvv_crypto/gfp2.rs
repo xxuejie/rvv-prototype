@@ -80,6 +80,15 @@ impl Gfp2 {
         self
     }
 
+    pub fn conjugate_to(&self) -> Self {
+        let mut r = Gfp2([
+            unsafe { MaybeUninit::uninit().assume_init() },
+            self.y().clone(),
+        ]);
+        gfp::neg_to(self.x_slice(), r.x_slice_mut());
+        r
+    }
+
     pub fn neg_ref(&mut self) -> &mut Self {
         gfp::neg(&mut self.0);
         self
