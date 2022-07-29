@@ -1,3 +1,4 @@
+mod casts;
 mod constants;
 pub mod cross_tests;
 pub mod curve;

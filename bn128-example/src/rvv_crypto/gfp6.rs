@@ -1,4 +1,10 @@
-use super::{constants::*, gfp::Gfp, gfp2::Gfp2, macros::gfp_ops_impl};
+use super::{
+    casts::*,
+    constants::*,
+    gfp::{self, Gfp},
+    gfp2::Gfp2,
+    macros::gfp_ops_impl,
+};
 use core::mem::MaybeUninit;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
@@ -75,14 +81,19 @@ impl Gfp6 {
     }
 
     pub fn neg_ref(&mut self) -> &mut Self {
-        self.x_mut().neg_ref();
-        self.y_mut().neg_ref();
-        self.z_mut().neg_ref();
+        let dst = gfp2_to_gfp_slice_mut(&mut self.0);
+        gfp::neg(dst);
         self
     }
 
     pub fn neg_to(&self) -> Self {
-        Self([self.x().neg_to(), self.y().neg_to(), self.z().neg_to()])
+        let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
+
+        let dst = gfp2_to_gfp_slice_mut(&mut r.0);
+        let src = gfp2_to_gfp_slice(&self.0);
+        gfp::neg_to(src, dst);
+
+        r
     }
 
     pub fn frobenius(&mut self) -> &mut Self {
@@ -127,32 +138,40 @@ impl Gfp6 {
     }
 
     pub fn add_ref(&mut self, b: &Gfp6) -> &mut Self {
-        self.0[0] += b.x();
-        self.0[1] += b.y();
-        self.0[2] += b.z();
+        let dst = gfp2_to_gfp_slice_mut(&mut self.0);
+        let src = gfp2_to_gfp_slice(&b.0);
+
+        gfp::add_mov(dst, src);
         self
     }
 
     pub fn add_to(a: &Gfp6, b: &Gfp6) -> Self {
         let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
-        r.0[0] = a.x() + b.x();
-        r.0[1] = a.y() + b.y();
-        r.0[2] = a.z() + b.z();
+
+        let c = gfp2_to_gfp_slice_mut(&mut r.0);
+        let a = gfp2_to_gfp_slice(&a.0);
+        let b = gfp2_to_gfp_slice(&b.0);
+        gfp::add(a, b, c);
+
         r
     }
 
     pub fn sub_ref(&mut self, b: &Gfp6) -> &mut Self {
-        self.0[0] -= b.x();
-        self.0[1] -= b.y();
-        self.0[2] -= b.z();
+        let dst = gfp2_to_gfp_slice_mut(&mut self.0);
+        let src = gfp2_to_gfp_slice(&b.0);
+
+        gfp::sub_mov(dst, src);
         self
     }
 
     pub fn sub_to(a: &Gfp6, b: &Gfp6) -> Self {
         let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
-        r.0[0] = a.x() - b.x();
-        r.0[1] = a.y() - b.y();
-        r.0[2] = a.z() - b.z();
+
+        let c = gfp2_to_gfp_slice_mut(&mut r.0);
+        let a = gfp2_to_gfp_slice(&a.0);
+        let b = gfp2_to_gfp_slice(&b.0);
+        gfp::sub(a, b, c);
+
         r
     }
 
@@ -237,18 +256,21 @@ impl Gfp6 {
     }
 
     pub fn mul_gfp(&mut self, b: &Gfp) -> &mut Self {
-        self.x_mut().mul_scalar(b);
-        self.y_mut().mul_scalar(b);
-        self.z_mut().mul_scalar(b);
+        let dst = gfp2_to_gfp_slice_mut(&mut self.0);
+
+        gfp::mul_mov_scalar(dst, b);
+
         self
     }
 
     pub fn mul_gfp_to(&self, b: &Gfp) -> Self {
-        Gfp6([
-            self.x().mul_scalar_to(b),
-            self.y().mul_scalar_to(b),
-            self.z().mul_scalar_to(b),
-        ])
+        let mut r: Gfp6 = unsafe { MaybeUninit::uninit().assume_init() };
+
+        let c = gfp2_to_gfp_slice_mut(&mut r.0);
+        let a = gfp2_to_gfp_slice(&self.0);
+        gfp::mul_scalar(a, b, c);
+
+        r
     }
 
     pub fn mul_tau(&mut self) -> &mut Self {

@@ -1,4 +1,10 @@
-use super::{constants::*, gfp::Gfp, gfp6::Gfp6, macros::gfp_ops_impl};
+use super::{
+    casts::*,
+    constants::*,
+    gfp::{self, Gfp},
+    gfp6::Gfp6,
+    macros::gfp_ops_impl,
+};
 use crate::arith::U256;
 use core::mem::MaybeUninit;
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
@@ -126,8 +132,10 @@ impl Gfp12 {
     }
 
     pub fn add_ref(&mut self, b: &Gfp12) -> &mut Self {
-        self.x_mut().add_ref(&b.x());
-        self.y_mut().add_ref(&b.y());
+        let dst = gfp6_to_gfp_slice_mut(&mut self.0);
+        let src = gfp6_to_gfp_slice(&b.0);
+
+        gfp::add_mov(dst, src);
         self
     }
 
